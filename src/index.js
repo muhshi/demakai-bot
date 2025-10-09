@@ -4,13 +4,13 @@ import { connectDB, disconnectDB } from "./db.js";
 import { checkOllamaHealth } from "./embedding.js";
 
 /**
- * Main application entry point
- * Support both:
- * - Development mode: whatsapp-web.js (QR scan)
- * - Production mode: Mimmach HTTP API (webhook)
+ * Main entry point — DemakAI WhatsApp Bot
+ * Supports:
+ * - Development Mode: whatsapp-web.js (QR scan)
+ * - Production Mode: Mimmach HTTP API + Webhook
  */
 
-const MODE = process.env.BOT_MODE || "dev"; // "dev" or "prod"
+const MODE = process.env.BOT_MODE; // default = dev
 
 async function main() {
   console.log("═══════════════════════════════════════");
@@ -18,85 +18,109 @@ async function main() {
   console.log(`   Mode: ${MODE === "dev" ? "Development" : "Production"}`);
   console.log("═══════════════════════════════════════\n");
 
-  // 1. Validate environment
+  // 1️⃣ Validate environment
   validateEnvironment();
 
-  // 2. Connect to database
+  // 2️⃣ Connect to MongoDB
   try {
     await connectDB();
+    console.log("✅ MongoDB connected\n");
   } catch (error) {
-    console.error("❌ Database connection failed:", error);
+    console.error("❌ Database connection failed:", error.message);
     process.exit(1);
   }
 
-  // 3. Check Ollama health
-  const health = await checkOllamaHealth();
-  if (!health.available) {
-    console.warn("⚠️ Ollama not available!");
-    console.warn("   Start Ollama: ollama serve\n");
-  } else {
-    console.log("✅ Ollama is running");
-    console.log(
-      `   LLM: ${health.llmModelLoaded ? "✅" : "⚠️"} ${process.env.LLM_MODEL}`
-    );
-    console.log(
-      `   Embedding: ${health.embeddingModelLoaded ? "✅" : "⚠️"} ${
-        process.env.EMBEDDING_MODEL
-      }\n`
-    );
-  }
+  // 3️⃣ Show LLM provider info
+  showLLMProviderInfo();
 
-  // 4. Start bot based on mode
-  if (MODE === "dev") {
-    await startDevMode();
-  } else {
-    await startProdMode();
-  }
+  // 4️⃣ Check Ollama (for embeddings)
+  await showOllamaHealth();
 
-  // 5. Graceful shutdown
+  // 5️⃣ Start bot
+  if (MODE === "dev") await startDevMode();
+  else await startProdMode();
+
+  // 6️⃣ Graceful shutdown
   setupGracefulShutdown();
 }
 
 /**
- * Development Mode - whatsapp-web.js
+ * Detect and display current LLM provider
+ */
+function showLLMProviderInfo() {
+  const base = process.env.LLM_BASE_URL || "";
+  const model = process.env.LLM_MODEL || "Unknown";
+  let provider = "Tidak diketahui";
+
+  if (base.includes("googleapis")) provider = "Gemini API (Google)";
+  else if (base.includes("openai.com")) provider = "OpenAI API";
+  else if (base.includes("groq")) provider = "Groq API";
+  else if (base.includes("localhost") || base.includes("11434"))
+    provider = "Ollama Lokal";
+
+  console.log("🧠 LLM Provider Information");
+  console.log(`   Provider : ${provider}`);
+  console.log(`   Model    : ${model}`);
+  console.log(`   Base URL : ${base}\n`);
+}
+
+/**
+ * Check Ollama local service (for embeddings)
+ */
+async function showOllamaHealth() {
+  console.log("🧩 Checking local Ollama service...");
+  try {
+    const health = await checkOllamaHealth();
+
+    if (!health.available) {
+      console.warn("⚠️ Ollama not available (only affects embeddings).");
+      console.warn("   Jalankan: ollama serve\n");
+    } else {
+      console.log("✅ Ollama is running");
+      console.log(
+        `   Embedding model: ${health.embeddingModelLoaded ? "✅" : "⚠️"} ${
+          process.env.EMBEDDING_MODEL
+        }\n`
+      );
+    }
+  } catch (err) {
+    console.error("❌ Error checking Ollama:", err.message);
+  }
+}
+
+/**
+ * DEVELOPMENT MODE (whatsapp-web.js)
  */
 async function startDevMode() {
   console.log("🔧 Starting in DEVELOPMENT mode...\n");
-
   const { startDevBot } = await import("./wa.bot.js");
 
   try {
     await startDevBot();
   } catch (error) {
-    console.error("❌ Failed to start dev bot:", error);
+    console.error("❌ Failed to start dev bot:", error.message);
     process.exit(1);
   }
 }
 
 /**
- * Production Mode - Mimmach HTTP API + Webhook
+ * PRODUCTION MODE (Mimmach API + Webhook)
  */
 async function startProdMode() {
   console.log("🚀 Starting in PRODUCTION mode...\n");
 
   const { WhatsAppClient, handleWebhook } = await import("./waClient.js");
-
-  // Initialize WA client
   const waClient = new WhatsAppClient();
-  global.waClient = waClient; // Store globally for webhook
+  global.waClient = waClient;
 
   try {
     await waClient.initialize();
     waClient.startHealthCheck();
   } catch (error) {
-    console.error("❌ WhatsApp initialization failed:", error);
-    console.log(
-      "   Make sure WA API is running at:",
-      process.env.WA_API_BASE_URL
-    );
+    console.error("❌ WhatsApp initialization failed:", error.message);
+    console.log("   Ensure WA API is running at:", process.env.WA_API_BASE_URL);
   }
 
-  // Setup Express server for webhook
   const app = express();
   app.use(express.json());
 
@@ -107,37 +131,48 @@ async function startProdMode() {
   app.get("/health", async (req, res) => {
     const waStatus = await waClient.getSessionStatus();
     const ollamaHealth = await checkOllamaHealth();
+    const base = process.env.LLM_BASE_URL || "";
+    const model = process.env.LLM_MODEL || "Unknown";
+
+    let provider = "Tidak diketahui";
+    if (base.includes("googleapis")) provider = "Gemini API (Google)";
+    else if (base.includes("openai.com")) provider = "OpenAI API";
+    else if (base.includes("groq")) provider = "Groq API";
+    else if (base.includes("localhost") || base.includes("11434"))
+      provider = "Ollama Lokal";
 
     res.json({
       status: "ok",
+      mode: MODE,
       whatsapp: {
         ready: waClient.isReady,
         state: waStatus.state,
       },
-      ollama: {
+      embedding: {
         available: ollamaHealth.available,
-        llmModel: process.env.LLM_MODEL,
-        embeddingModel: process.env.EMBEDDING_MODEL,
+        model: process.env.EMBEDDING_MODEL,
+      },
+      llm: {
+        provider,
+        base_url: base,
+        model,
       },
     });
   });
 
-  // Start server
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`\n✅ Webhook server running on port ${PORT}`);
+    console.log(`✅ Webhook server running on port ${PORT}`);
     console.log(`   Webhook URL: http://localhost:${PORT}/webhook`);
     console.log(`   Health check: http://localhost:${PORT}/health\n`);
   });
 
-  // Setup webhook
   try {
     const webhookUrl =
       process.env.WEBHOOK_URL || `http://localhost:${PORT}/webhook`;
     await waClient.setupWebhook(webhookUrl);
   } catch (error) {
     console.warn("⚠️ Failed to setup webhook:", error.message);
-    console.warn("   Configure webhook manually if needed\n");
   }
 
   console.log("✨ Production mode ready!");
@@ -145,22 +180,24 @@ async function startProdMode() {
 }
 
 /**
- * Validate environment variables
+ * Validate required environment variables
  */
 function validateEnvironment() {
-  const required = ["MONGO_URI", "OLLAMA_BASE_URL", "LLM_MODEL"];
+  const required = [
+    "MONGO_URI",
+    "OLLAMA_BASE_URL",
+    "EMBEDDING_MODEL",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+  ];
 
-  // Add WA_API_BASE_URL untuk production mode
-  if (MODE === "prod") {
-    required.push("WA_API_BASE_URL");
-  }
+  if (MODE === "prod") required.push("WA_API_BASE_URL");
 
   const missing = required.filter((key) => !process.env[key]);
-
   if (missing.length > 0) {
     console.error("❌ Missing required environment variables:");
-    missing.forEach((key) => console.error(`   - ${key}`));
-    console.error("\nCheck your .env file");
+    missing.forEach((k) => console.error(`   - ${k}`));
+    console.error("\nCheck your .env file before running the bot.\n");
     process.exit(1);
   }
 
@@ -168,19 +205,17 @@ function validateEnvironment() {
 }
 
 /**
- * Graceful shutdown
+ * Graceful shutdown handler
  */
 function setupGracefulShutdown() {
   const shutdown = async (signal) => {
-    console.log(`\n\n📴 Received ${signal}, shutting down gracefully...`);
-
+    console.log(`\n📴 Received ${signal}, shutting down gracefully...`);
     try {
       await disconnectDB();
       console.log("✅ Database disconnected");
     } catch (error) {
-      console.error("❌ Error during shutdown:", error);
+      console.error("❌ Error during shutdown:", error.message);
     }
-
     process.exit(0);
   };
 
@@ -189,7 +224,7 @@ function setupGracefulShutdown() {
 }
 
 /**
- * Error handlers
+ * Global error handlers
  */
 process.on("uncaughtException", (error) => {
   console.error("\n💥 Uncaught Exception:", error);
@@ -201,8 +236,8 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-// Start application
+// 🚀 Start the bot
 main().catch((error) => {
-  console.error("💥 Fatal error:", error);
+  console.error("💥 Fatal error:", error.message);
   process.exit(1);
 });

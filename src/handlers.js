@@ -209,6 +209,7 @@ ${health.available ? "✅" : "❌"} ${health.available ? "Online" : "Offline"}
         process.env.EMBEDDING_MODEL
       }
 • LLM: ${health.llmModelLoaded ? "✅" : "⚠️"} ${process.env.LLM_MODEL}
+• Provider: ${health.llmProvider}
 
 ${!health.available ? "⚠️ Perlu check koneksi ke Ollama!" : ""}`;
 

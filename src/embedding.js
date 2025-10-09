@@ -67,7 +67,7 @@ async function generateEmbeddingWithRetry(text, maxRetries) {
       const resp = await axios.post(
         url,
         {
-          model: process.env.EMBEDDING_MODEL || "bge-m3",
+          model: process.env.EMBEDDING_MODEL,
           prompt: text,
         },
         { timeout: 30000 }
@@ -219,7 +219,7 @@ export function getCacheStats() {
 }
 
 /**
- * Health check untuk Ollama
+ * Health check untuk Embedding (Ollama) dan deteksi LLM Provider
  */
 export async function checkOllamaHealth() {
   try {
@@ -227,24 +227,40 @@ export async function checkOllamaHealth() {
     const resp = await axios.get(url, { timeout: 5000 });
 
     const models = resp.data.models || [];
-    const embeddingModel = process.env.EMBEDDING_MODEL || "bge-m3";
-    const llmModel = process.env.LLM_MODEL || "llama3.1:8b";
+    const embeddingModel = process.env.EMBEDDING_MODEL;
+    const llmModel = process.env.LLM_MODEL;
+    const provider = process.env.LLM_BASE_URL || "";
+
+    // Deteksi provider LLM
+    let llmProvider = "Tidak diketahui";
+    if (provider.includes("googleapis")) llmProvider = "Gemini API";
+    else if (provider.includes("openai.com")) llmProvider = "OpenAI API";
+    else if (provider.includes("groq")) llmProvider = "Groq API";
+    else if (provider.includes("localhost") || provider.includes("11434"))
+      llmProvider = "Ollama (local)";
 
     return {
       status: "healthy",
       available: true,
       embeddingModelLoaded: models.some((m) => m.name.includes(embeddingModel)),
       llmModelLoaded: models.some((m) => m.name.includes(llmModel)),
+      embeddingModel,
+      llmModel,
+      llmProvider,
       models: models.map((m) => m.name),
     };
   } catch (error) {
     return {
       status: "unhealthy",
       available: false,
+      embeddingModel: process.env.EMBEDDING_MODEL,
+      llmModel: process.env.LLM_MODEL,
+      llmProvider: process.env.LLM_BASE_URL || "Tidak diketahui",
       error: error.message,
     };
   }
 }
+
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -67,10 +67,16 @@ Gunakan bahasa Indonesia yang santai tapi profesional, seolah kamu petugas BPS y
 }
 
 /**
- * Call Ollama LLM
+ * Call LLM (Ollama / Gemini / OpenAI / Groq) berdasarkan LLM_BASE_URL
  */
 async function callOllama(systemPrompt, userPrompt, history = []) {
   try {
+    const base = process.env.LLM_BASE_URL;
+    const model = process.env.LLM_MODEL;
+
+    // ✳️ Deteksi provider dari URL
+    console.log(`🤖 [DemakAI] Using LLM provider from: ${base}`);
+
     const messages = [
       { role: "system", content: String(systemPrompt ?? "") },
       ...history.slice(-LLM_CONFIG.context_window).map((m) => ({
@@ -80,8 +86,68 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
       { role: "user", content: String(userPrompt ?? "") },
     ];
 
+    // ---- 1️⃣ GEMINI ----
+    if (base.includes("generativelanguage.googleapis.com")) {
+      console.log("⚡ Provider: Gemini API");
+      const resp = await axios.post(
+        `${base}${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          contents: [
+            {
+              role: "user",
+              parts: messages.map((m) => ({ text: m.content })),
+            },
+          ],
+        },
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: TIMEOUTS.ollama_request,
+        }
+      );
+
+      return resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    }
+
+    // ---- 2️⃣ OPENAI (GPT) ----
+    if (base.includes("openai.com")) {
+      console.log("⚡ Provider: OpenAI API");
+      const resp = await axios.post(
+        base,
+        { model, messages },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: TIMEOUTS.ollama_request,
+        }
+      );
+
+      return resp.data?.choices?.[0]?.message?.content || "";
+    }
+
+    // ---- 3️⃣ GROQ ----
+    if (base.includes("groq")) {
+      console.log("⚡ Provider: Groq API");
+      const resp = await axios.post(
+        base,
+        { model, messages },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: TIMEOUTS.ollama_request,
+        }
+      );
+
+      return resp.data?.choices?.[0]?.message?.content || "";
+    }
+
+    // ---- 4️⃣ OLLAMA (default / local) ----
+    console.log("⚡ Provider: Ollama (Local)");
     const payload = {
-      model: process.env.LLM_MODEL || "llama3.1:8b",
+      model,
       messages,
       stream: false,
       options: {
@@ -91,30 +157,18 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
       },
     };
 
-    // 🔍 pastikan payload aman untuk JSON
-    try {
-      JSON.stringify(payload);
-    } catch (e) {
-      console.error("⚠️ Payload tidak bisa di-serialize:", e.message);
-      throw e;
-    }
+    // Warmup supaya model aktif di memori
+    await warmupModel(model);
 
-    // 🧩 tambahkan warmup singkat untuk memastikan model siap
-    await warmupModel(payload.model);
-
-    // ⏱️ retry sampai 2x jika gagal
+    // Retry 2x jika koneksi error
     const maxRetry = 2;
     let lastError;
+
     for (let attempt = 1; attempt <= maxRetry + 1; attempt++) {
       try {
-        const resp = await axios.post(
-          `${process.env.OLLAMA_BASE_URL}/api/chat`,
-          payload,
-          {
-            timeout: TIMEOUTS.ollama_request,
-          }
-        );
-
+        const resp = await axios.post(`${base}/api/chat`, payload, {
+          timeout: TIMEOUTS.ollama_request,
+        });
         return resp.data?.message?.content || "";
       } catch (err) {
         lastError = err;
@@ -126,21 +180,24 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
 
         if (attempt <= maxRetry && (isTimeout || maybeBusy)) {
           console.warn(
-            `⚠️ Ollama retry ${attempt}/${maxRetry} karena: ${err.message}`
+            `⚠️ Retry Ollama ${attempt}/${maxRetry} karena: ${err.message}`
           );
-          await new Promise((r) => setTimeout(r, 1500)); // jeda 1.5 detik antar percobaan
+          await new Promise((r) => setTimeout(r, 1500));
           continue;
         }
+
         console.error("❌ Ollama call failed:", err.message);
         throw err;
       }
     }
+
     throw lastError;
   } catch (error) {
-    console.error("❌ Ollama call failed:", error.message);
+    console.error("❌ LLM call failed:", error.message);
     throw error;
   }
 }
+
 
 /**
  * Warmup supaya model aktif di memori
@@ -148,7 +205,7 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
 async function warmupModel(model) {
   try {
     await axios.post(
-      `${process.env.OLLAMA_BASE_URL}/api/generate`,
+      `${process.env.LLM_BASE_URL}/api/generate`,
       {
         model,
         prompt: "ok",
