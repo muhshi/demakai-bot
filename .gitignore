@@ -3,19 +3,20 @@
 # =====================================================
 .env
 .env.local
-.env.*
-!.env.example
+.env.*        # ignore semua file .env tambahan
+!.env.example # tapi tetap commit contoh konfigurasi
 
 # =====================================================
-# 🧩 NODE MODULES & BUILD
+# 🧩 NODE MODULES & BUILD FILES
 # =====================================================
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 dist/
 build/
 coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # =====================================================
 # 💬 WHATSAPP WEB.JS AUTH & CACHE
@@ -29,17 +30,18 @@ coverage/
 .wwebjs_session/
 
 # =====================================================
-# ⚙️ TEMPORARY FILES
+# ⚙️ TEMPORARY & CACHE FILES
 # =====================================================
 tmp/
 temp/
 cache/
 logs/
-*.log
 *.tmp
+*.bak
+*.swp
 
 # =====================================================
-# 💾 DATABASE / DATA (jika nanti ada)
+# 💾 DATABASE / DATA (opsional lokal)
 # =====================================================
 data/
 database/
@@ -56,10 +58,10 @@ ollama_cache/
 ollama_models/
 
 # =====================================================
-# 🧪 TEST / DEV FILES
+# 🧪 TEST / DEVELOPMENT FILES
 # =====================================================
 __tests__/
-test/
+tests/
 debug/
 *.test.js
 *.spec.js
@@ -71,3 +73,9 @@ debug/
 .idea/
 .DS_Store
 Thumbs.db
+
+# =====================================================
+# ✅ PROJECT METADATA (PASTIKAN TIDAK TER-IGNORE)
+# =====================================================
+!package.json
+!package-lock.json
