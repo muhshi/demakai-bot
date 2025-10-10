@@ -1,13 +1,13 @@
 version: "3.9"
 services:
-  demakai-bot:
+  demakai-bot-dev:
     build: .
-    container_name: demakai-bot
+    container_name: demakai-bot-dev
     ports:
       - "3000:3000"
     env_file:
       - .env
-    restart: always
+    restart: unless-stopped
     networks:
       - demakai-net
     volumes:

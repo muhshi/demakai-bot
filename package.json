@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "node src/test.js",
+    "start:mode": "node -e \"import('dotenv/config.js').then(()=>{process.env.BOT_MODE==='dev'?require('child_process').exec('npm run dev',{stdio:'inherit'}):require('child_process').exec('npm start',{stdio:'inherit'})})\"",
     "stats": "node scripts/showStats.js",
     "cleanup": "node scripts/cleanup.js",
     "cleanup:old": "node scripts/cleanupOldSessions.js"
