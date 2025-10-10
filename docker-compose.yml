@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  demakai-bot:
+    build: .
+    container_name: demakai-bot
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    restart: always
+    volumes:
+      - .:/app   # sinkron kode host <-> container (optional untuk dev)
+    environment:
+      - NODE_ENV=production
+    networks:
+      - demakai-net
+
+networks:
+  demakai-net:
+    driver: bridge
