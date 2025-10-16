@@ -4,14 +4,16 @@ services:
     build: .
     container_name: demakai-bot
     ports:
-      - "3000:3000"
+      - "3001:3000"
     env_file:
       - .env
+    environment:
+      - BOT_MODE=Production
     restart: always
-    networks:
-      - demakai-net
     volumes:
       - .:/app
+    networks:
+      - demakai-net
 
 networks:
   demakai-net:
