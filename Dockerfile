@@ -1,22 +1,22 @@
 # ========================================
-# 🐳 DEMAKAI BOT DOCKERFILE — FINAL FIX
+# 🐳 DEMAKAI BOT DOCKERFILE — FIXED
 # ========================================
 FROM node:20-alpine
 
-# Buat direktori kerja
+# 1️⃣ Set working directory
 WORKDIR /app
 
-# Salin dependency file dulu (lebih efisien untuk caching)
+# 2️⃣ Copy dependency files
 COPY package*.json ./
 
-# Install semua dependency
-RUN npm install --production
+# 3️⃣ Install dependencies
+RUN npm install
 
-# Setelah dependency terinstall, baru salin seluruh source code
+# 4️⃣ Copy the rest of the code
 COPY . .
 
-# Tentukan port
+# 5️⃣ Expose port
 EXPOSE 3000
 
-# Jalankan sesuai BOT_MODE
+# 6️⃣ Run the app
 CMD ["npm", "run", "start:mode"]
