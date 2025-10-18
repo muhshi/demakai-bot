@@ -7,8 +7,6 @@ services:
       - "3001:3000"
     env_file:
       - .env
-    environment:
-      - BOT_MODE=Production
     restart: always
     volumes:
       - .:/app

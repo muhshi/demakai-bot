@@ -6,9 +6,7 @@ services:
     ports:
       - "3002:3000"
     env_file:
-      - .env
-    environment:
-      - BOT_MODE=dev
+      - .env.dev
     restart: unless-stopped
     volumes:
       - .:/app
