@@ -11,8 +11,8 @@ services:
     volumes:
       - .:/app
     networks:
-      - demakai-net
+      - demakai-prod-net
 
 networks:
-  demakai-net:
+  demakai-prod-net:
     driver: bridge

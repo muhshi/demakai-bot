@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "start:mode": "node scripts/index.js",
+    "start:mode": "node src/index.js",
     "stats": "node scripts/showStats.js",
     "cleanup": "node scripts/cleanup.js",
     "cleanup:old": "node scripts/cleanupOldSessions.js"

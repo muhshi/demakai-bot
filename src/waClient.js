@@ -1,5 +1,5 @@
 import axios from "axios";
-import { handleMessage } from "./handler.js";
+import { handleMessage } from "./handlers.js";
 import { getDB } from "./db.js";
 
 /**

@@ -15,6 +15,9 @@ RUN npm install
 # 4️⃣ Copy the rest of the code
 COPY . .
 
+# Pastikan dotenv memang terinstall
+RUN npm list dotenv || npm install dotenv
+
 # 5️⃣ Expose port
 EXPOSE 3000
 
