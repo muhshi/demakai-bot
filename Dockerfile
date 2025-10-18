@@ -1,20 +1,21 @@
-# ======================================
-# 🧱 DOCKERFILE — multi-mode (dev/prod)
-# ======================================
-
+# ========================================
+# 🐳 DEMAKAI BOT DOCKERFILE — FINAL FIX
+# ========================================
 FROM node:20-alpine
 
 # Buat direktori kerja
 WORKDIR /app
 
-# Copy file package dan install semua dependency
+# Salin dependency file dulu (lebih efisien untuk caching)
 COPY package*.json ./
-RUN npm install
 
-# Copy semua source code
+# Install semua dependency
+RUN npm install --production
+
+# Setelah dependency terinstall, baru salin seluruh source code
 COPY . .
 
-# Port default
+# Tentukan port
 EXPOSE 3000
 
 # Jalankan sesuai BOT_MODE
