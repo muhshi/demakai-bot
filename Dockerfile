@@ -10,13 +10,10 @@ WORKDIR /app
 COPY package*.json ./
 
 # 3️⃣ Install dependencies
-RUN npm install
+RUN npm install --omit=dev
 
 # 4️⃣ Copy the rest of the code
 COPY . .
-
-# Pastikan dotenv memang terinstall
-RUN npm list dotenv || npm install dotenv
 
 # 5️⃣ Expose port
 EXPOSE 3000

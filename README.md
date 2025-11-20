@@ -1,257 +1,105 @@
 # DemakAI WhatsApp Bot
 
-RAG-based intelligent assistant untuk KBLI (Klasifikasi Baku Lapangan Usaha Indonesia), KBJI (Klasifikasi Baku Jabatan Indonesia), dan publikasi statistik.
+RAG-powered assistant untuk KBLI/KBJI dan publikasi statistik, berjalan di WhatsApp via gateway `mimamch/wa-gateway`, LLM Gemini, dan embedding Ollama.
 
-## ✨ Features
+## Ringkasannya
+- Mode: `BOT_MODE=prod` memakai wa-gateway (multi session, webhook push).
+- LLM: Gemini (`gemini-2.5-flash`) via Google Generative Language API.
+- Embedding: Ollama lokal (`bge-m3`).
+- WhatsApp gateway: `WA_API_BASE_URL` default `http://10.133.21.24:5001`, session `demak-bot`.
+- Webhook bot: listen di port `3000`, endpoint utama `POST /webhook/message` (juga `/webhook`, `/webhook/session`).
+- Polling dimatikan (`WA_ENABLE_POLLING=false`); gateway diharapkan mengirim webhook.
 
-- 📋 **Mode KBLI/KBJI** - Cari kode klasifikasi usaha dan jabatan (Text Search)
-- 📚 **Mode Publikasi** - Cari data dan publikasi (Semantic Search dengan Embeddings)
-- 💬 **Mode Natural** - Percakapan natural seperti ChatGPT
-- 🔄 **Hash Trigger System** - Aktivasi mode dengan #kbli, #kbji, atau #publikasi
-- ⏰ **Auto-Reset** - Mode kembali ke natural setelah 15 menit idle
-- 📊 **Statistics & Monitoring** - Built-in stats untuk tracking usage
+## Prasyarat
+- Node.js 18+ dan npm
+- MongoDB (URI di `.env`)
+- Ollama dengan model `bge-m3` tersedia (`ollama pull bge-m3`)
+- Kontainer wa-gateway (mimamch/wa-gateway) berjalan dan sudah scan QR untuk session Anda
 
-## 🏗️ Architecture
-
-```
-User → WhatsApp → Mimmach API → Bot Handler
-                                    ↓
-                    ┌───────────────┴────────────────┐
-                    │                                │
-              Mode Detection                    Session Check
-            (#kbli/#publikasi)              (15min auto-reset)
-                    │                                │
-        ┌───────────┼────────────┐                  │
-        ▼           ▼            ▼                  ▼
-   Natural     KBLI/KBJI    Publikasi         History
-     Mode    (Text Search) (Embeddings)       Context
-        │           │            │                  │
-        └───────────┼────────────┘                  │
-                    ▼                                │
-                  LLM (Ollama)  ◄───────────────────┘
-                    │
-                    ▼
-                Response
-```
-
-## 📦 Installation
-
+## Instalasi
 ```bash
-# 1. Clone repository
 git clone <repo-url>
-cd DemakAI-bot
-
-# 2. Install dependencies
+cd ChatbotWADemak
 npm install
-
-# 3. Setup environment
 cp .env.example .env
-# Edit .env
-
-# 4. Install Ollama models
-ollama pull llama3.1:8b
-ollama pull bge-m3
-
-# 5. Start Ollama
-ollama serve
-
-# 6. Start bot
-npm start
 ```
 
-## ⚙️ Environment Variables
-
-```bash
+## Konfigurasi `.env`
+Sesuaikan nilai berikut:
+```
 # Database
-MONGO_URI=
+MONGO_URI=mongodb://user:pass@host:27017/?authSource=admin
+DB_NAME=demakAI
 
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-LLM_MODEL=llama3.1:8b
+# LLM / Embedding
+OLLAMA_BASE_URL=http://<ip-ollama>:11434
 EMBEDDING_MODEL=bge-m3
 EMBEDDING_DIMENSION=1024
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/models/
+LLM_MODEL=gemini-2.5-flash
+GEMINI_API_KEY=<api-key>
 
-# WhatsApp API (Mimmach)
-WA_API_BASE_URL=
-WA_SESSION_NAME=
+# WhatsApp Gateway
+WA_API_BASE_URL=http://<ip-gateway>:5001
+WA_SESSION_ID=demak-bot
+WA_ENABLE_POLLING=false
+WA_ENABLE_WEBHOOK_REGISTER=false
 
-# Webhook (optional)
-PORT=
-WEBHOOK_URL=
-
-# Cleanup (optional)
-CLEANUP_INACTIVE_DAYS=90
+# Bot
+BOT_MODE=prod
+PORT=3000
 ```
 
-## 🎯 Usage
+## Menjalankan
+1. Pastikan Ollama aktif: `ollama serve`.
+2. Pastikan wa-gateway aktif dan sesi telah scan QR: `http://<ip-gateway>:5001/session/start?session=demak-bot`.
+3. Set env di gateway agar webhook menuju bot: `WEBHOOK_BASE_URL=http://<IP-bot>:3000`, lalu restart kontainer gateway.
+4. Jalankan bot: `npm start`.
+5. Cek kesehatan bot: `curl http://localhost:3000/health`.
 
-### Mode System
+## Pengujian Tanpa WhatsApp
+- PowerShell:
+  ```
+  curl.exe --% -X POST http://localhost:3000/webhook/message ^
+    -H "Content-Type: application/json" ^
+    -d '{"from":"628xxxx@s.whatsapp.net","text":"apa itu kbli?"}'
+  ```
+- Git Bash:
+  ```
+  curl -X POST "http://localhost:3000/webhook/message" \
+    -H 'Content-Type: application/json' \
+    -d '{"from":"628xxxx@s.whatsapp.net","text":"apa itu kbli?"}'
+  ```
 
-**Aktivasi Mode:**
-- `#kbli [query]` - Mode KBLI (usaha/kegiatan)
-- `#kbji [query]` - Mode KBJI (pekerjaan/jabatan)  
-- `#publikasi [query]` - Mode Publikasi (data/statistik)
-- `/home` - Kembali ke mode natural
+## Mode & Perintah
+- `#kbli [query]` / `#kbji [query]` – Mode KBLI/KBJI (text search)
+- `#publikasi [query]` – Mode Publikasi (RAG + embedding)
+- `/home` – Kembali ke mode natural
+- `/help`, `/clear`, `/stats`, `/health`
 
-**Contoh:**
+## Struktur Proyek (ringkas)
 ```
-User: #kbli saya mau buka usaha fotokopi
-Bot: [📋 Mode KBLI aktif]
-     Berikut kemungkinan yang paling relevan:
-     
-     KBLI (usaha/kegiatan):
-     1. [82199] Fotokopi, Persiapan Dokumen...
-     ...
-
-User: kok gak ada yang cocok?
-Bot: [percakapan natural, context-aware]
-
-User: /home
-Bot: [💬 Mode Natural aktif]
-```
-
-### Commands
-
-- `/help` - Panduan penggunaan
-- `/clear` - Hapus riwayat percakapan
-- `/stats` - Statistik sistem
-- `/health` - Status server
-- `/home` - Kembali ke mode natural
-
-### Scripts
-
-```bash
-# Show statistics
-npm run stats
-
-# Cleanup all sessions (WARNING: Delete all!)
-npm run cleanup
-
-# Cleanup old sessions (>90 days inactive)
-npm run cleanup:old
+src/
+  index.js         # Entrypoint + webhook server
+  waClient.js      # Client untuk wa-gateway (prod)
+  wa.bot.js        # whatsapp-web.js (dev)
+  handlers.js      # Mode system + router pesan
+  rag.js, llm.js, embedding.js, db.js, session.js
+config/constants.js
+docs/chatgpt-notes.md
+.env, .env.example
 ```
 
-## 📁 Project Structure
-
-```
-DemakAI-bot/
-├── src/
-│   ├── db.js                 # Database abstraction layer
-│   ├── embedding.js          # Ollama embedding client
-│   ├── llm.js                # LLM handler (Ollama)
-│   ├── rag.js                # RAG pipeline
-│   ├── handlers.js           # Message handler dengan mode system
-│   ├── session.js            # Session management
-│   └── wa.client.js          # WhatsApp HTTP client (optional)
-├── config/
-│   └── constants.js          # Centralized config (synonyms, stopwords, etc)
-├── scripts/
-│   ├── showStats.js          # Statistics
-│   ├── cleanup.js            # Delete all sessions
-│   └── cleanupOldSessions.js # Cleanup inactive sessions
-├── .env
-├── .env.example
-├── package.json
-└── README.md
-```
-
-## 🔧 Configuration
-
-Edit `config/constants.js` untuk:
-
-**Tambah Synonyms:**
-```javascript
-export const SYNONYMS = {
-  "fotokopi": ["fotokopi", "fotocopy", "cetak", "penggandaan"],
-  "salon": ["salon", "pangkas", "cukur", "barbershop"],
-  // Tambah di sini
-};
-```
-
-**Adjust Thresholds:**
-```javascript
-export const SIMILARITY_THRESHOLD = {
-  kbli_kbji: 0.45,  // Lower = more results
-  publikasi: 0.60,  // Higher = more precise
-};
-```
-
-**Max Results:**
-```javascript
-export const MAX_RESULTS = {
-  kbli: 3,
-  kbji: 3,
-  publikasi: 8,
-};
-```
-
-## 🎨 Mode Indicators
-
-Setiap response dari bot akan include emoji indicator:
-- 💬 Natural Mode
-- 📋 KBLI/KBJI Mode
-- 📚 Publikasi Mode
-
-Footer navigation:
-```
-───────────────
-Ketik /home untuk mode natural | #publikasi untuk publikasi
-```
-
-## 🔍 Search Methods
-
-**KBLI/KBJI (Text Search):**
-1. MongoDB `$text` search dengan scoring
-2. Query expansion dengan sinonim
-3. Regex fallback jika text search kosong
-4. Take top 3 results
-
-**Publikasi (Semantic Search):**
-1. Embed query dengan Ollama
-2. Cosine similarity dengan document chunks
-3. Filter by threshold (0.60)
-4. Take top 8 chunks
-
-**Capacity:**
-- 1-5 concurrent users: Smooth
-- 5-10 users: Good (need monitoring)
-- 10+ users: Need scaling (queue system)
-
-## 🚀 Production Checklist
-
-- [ ] Set `LLM_MODEL=llama3.1:8b` (minimum)
-- [ ] Configure synonyms di `config/constants.js`
-- [ ] Setup monitoring (health checks)
-- [ ] Configure cleanup schedule (cron)
-- [ ] Setup Redis untuk production cache (optional)
-- [ ] Configure proper webhook URL
-- [ ] Setup backup MongoDB
-
-## 🐛 Troubleshooting
-
-**"Ollama not available"**
-```bash
-ollama serve
-ollama list  # Check models
-```
-
-**"Mode tidak reset"**
-Check session.modeActivatedAt - should auto-reset after 15 min idle.
-
-**"KBLI/KBJI tidak ketemu"**
-1. Check MongoDB text index exists: `db.KBLI2020.getIndexes()`
-2. Add more synonyms di `config/constants.js`
-3. Lower threshold di constants
-
-**"Publikasi tidak relevan"**
-1. Check embeddings exist di chunks
-2. Adjust `SIMILARITY_THRESHOLD.publikasi`
-3. Check Ollama embedding model loaded
-
-## 📝 License
-
-MIT
-
-## 🙏 Support
-
-Untuk pertanyaan atau issue, buka issue di repository.
+## Troubleshooting Cepat
+- Tidak ada balasan / tidak ada log webhook:
+  - Pastikan `WEBHOOK_BASE_URL` di gateway mengarah ke `http://<IP-bot>:3000`.
+  - Pastikan port 3000 terbuka dari mesin gateway (uji `curl http://<IP-bot>:3000/health` dari host gateway).
+- Timed Out saat kirim pesan:
+  - Tes manual ke gateway:
+    ```
+    curl.exe --% -X POST http://<ip-gateway>:5001/message/send-text ^
+      -H "Content-Type: application/json" ^
+      -d "{\"session\":\"demak-bot\",\"to\":\"628xxxx\",\"text\":\"tes langsung\"}"
+    ```
+  - Periksa `WA_API_BASE_URL` dan status kontainer gateway.
+- Port 3000 bentrok: hentikan instance lain atau ubah `PORT` di `.env`.
