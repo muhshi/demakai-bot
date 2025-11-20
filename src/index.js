@@ -123,9 +123,12 @@ async function startProdMode() {
 
   const app = express();
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
   // Webhook endpoint
   app.post("/webhook", handleWebhook);
+  app.post("/webhook/message", handleWebhook);
+  app.post("/webhook/session", handleWebhook);
 
   // Health check endpoint
   app.get("/health", async (req, res) => {
@@ -167,12 +170,19 @@ async function startProdMode() {
     console.log(`   Health check: http://localhost:${PORT}/health\n`);
   });
 
-  try {
-    const webhookUrl =
-      process.env.WEBHOOK_URL || `http://localhost:${PORT}/webhook`;
-    await waClient.setupWebhook(webhookUrl);
-  } catch (error) {
-    console.warn("⚠️ Failed to setup webhook:", error.message);
+  // Gateway supports webhook via its own env WEBHOOK_BASE_URL; registration API may not exist.
+  if (process.env.WA_ENABLE_WEBHOOK_REGISTER === "true") {
+    try {
+      const webhookUrl =
+        process.env.WEBHOOK_URL || `http://localhost:${PORT}/webhook`;
+      await waClient.setupWebhook(webhookUrl);
+    } catch (error) {
+      console.warn("⚠️ Failed to setup webhook:", error.message);
+    }
+  } else {
+    console.log(
+      "ℹ️ Skipping webhook registration call (set WA_ENABLE_WEBHOOK_REGISTER=true to attempt)."
+    );
   }
 
   console.log("✨ Production mode ready!");

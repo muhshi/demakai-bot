@@ -12,6 +12,9 @@ export class WhatsAppClient {
     this.sessionId = process.env.WA_SESSION_ID || "demak-bot";
     this.isReady = false;
     this.polling = false;
+    this.enablePolling = process.env.WA_ENABLE_POLLING === "true";
+    this.healthInterval = null;
+    this.lastKnownState = null;
     this.retryCount = 0;
     this.maxRetries = 5;
   }
@@ -38,8 +41,12 @@ export class WhatsAppClient {
       console.log("✅ WhatsApp client ready!");
       global.waClient = this;
 
-      // Start polling incoming messages
-      this.startPolling();
+      // Start polling incoming messages (optional for gateways without webhook env)
+      if (this.enablePolling) {
+        this.startPolling();
+      } else {
+        console.log("ℹ️ Polling disabled (set WA_ENABLE_POLLING=true to enable).");
+      }
     } catch (error) {
       console.error("❌ Failed to initialize WhatsApp:", error.message);
       await this.retryInitialize();
@@ -67,16 +74,24 @@ export class WhatsAppClient {
    * Get session status
    */
   async getSessionStatus() {
+    // Gateway docs do not include a status route; try best-effort and fallback gracefully
+    const statusUrl = `${this.baseURL}/session/status`;
+
     try {
-      const { data } = await axios.get(
-        `${this.baseURL}/session/${this.sessionId}/status`
-      );
-      return data;
+      const { data } = await axios.get(statusUrl, {
+        params: { session: this.sessionId },
+      });
+      return this.normalizeStatusResponse(data);
     } catch (error) {
-      if (error.response?.status === 404) {
-        return { state: "not_found" };
+      const status = error.response?.status;
+
+      if (status === 404 || status === 400) {
+        const fallback = await this.checkSessionList();
+        if (fallback) return fallback;
       }
-      throw error;
+
+      console.warn("⚠️ Status check failed (assuming unknown):", error.message);
+      return { state: "unknown" };
     }
   }
 
@@ -84,19 +99,29 @@ export class WhatsAppClient {
    * Start session (trigger QR code on gateway)
    */
   async startSession() {
+    const url = `${this.baseURL}/session/start`;
+
     try {
-      const { data } = await axios.post(`${this.baseURL}/session/start`, {
-        sessionId: this.sessionId,
-        options: { printQRInTerminal: true },
+      // Gateway supports GET with query param "session"
+      const { data } = await axios.get(url, {
+        params: { session: this.sessionId },
       });
       console.log("📲 Session started. Scan QR code in WA Gateway terminal!");
       return data;
     } catch (error) {
-      if (error.response?.status === 409) {
-        console.log("ℹ️ Session already exists, checking status...");
-        return;
+      // Try POST fallback
+      try {
+        const { data } = await axios.post(url, { session: this.sessionId });
+        console.log("📲 Session started via POST. Scan QR code in WA Gateway terminal!");
+        return data;
+      } catch (err) {
+        if (err.response?.status === 409) {
+          console.log("ℹ️ Session already exists, checking status...");
+          return;
+        }
+
+        throw new Error(this.formatAxiosError(err, "startSession"));
       }
-      throw error;
     }
   }
 
@@ -115,6 +140,9 @@ export class WhatsAppClient {
       if (status.state === "open") {
         console.log("✅ WhatsApp connected!");
         return true;
+      } else if (status.state === "unknown") {
+        console.log("ℹ️ WhatsApp status unknown; continuing without wait.");
+        return true;
       }
 
       console.log(`   Current status: ${status.state}`);
@@ -130,13 +158,11 @@ export class WhatsAppClient {
   async sendMessage(to, text) {
     try {
       const number = to.replace("@s.whatsapp.net", "");
-      await axios.post(
-        `${this.baseURL}/session/${this.sessionId}/send-message`,
-        {
-          to: number,
-          text,
-        }
-      );
+      await axios.post(`${this.baseURL}/message/send-text`, {
+        session: this.sessionId,
+        to: number,
+        text,
+      });
       console.log(`✅ Message sent to ${number}`);
     } catch (error) {
       console.error(
@@ -165,18 +191,8 @@ export class WhatsAppClient {
    * Typing indicator
    */
   async sendTyping(to) {
-    try {
-      const number = to.replace("@s.whatsapp.net", "");
-      await axios.post(
-        `${this.baseURL}/session/${this.sessionId}/send-presence`,
-        {
-          to: number,
-          presence: "composing",
-        }
-      );
-    } catch (err) {
-      console.warn("⚠️ Typing indicator failed:", err.message);
-    }
+    // Current gateway does not expose presence endpoint; skip typing to avoid noise
+    return;
   }
 
   /**
@@ -189,14 +205,10 @@ export class WhatsAppClient {
 
     while (true) {
       try {
-        const { data } = await axios.get(
-          `${this.baseURL}/session/${this.sessionId}/messages`
-        );
-        if (Array.isArray(data)) {
-          for (const msg of data) {
-            await this.processMessage(msg);
-          }
-        }
+        // Gateway does not expose a polling endpoint; stop to avoid 404 spam
+        console.warn("⚠️ Polling is not supported by this gateway. Stopping polling.");
+        this.polling = false;
+        return;
       } catch (error) {
         console.warn("⚠️ Polling error:", error.message);
       }
@@ -211,11 +223,30 @@ export class WhatsAppClient {
   async processMessage(message) {
     try {
       if (!message) return;
-      const from = message.from || message.remoteJid;
-      const text = message.text || message.body || message.conversation;
+
+      const from =
+        message.from ||
+        message.remoteJid ||
+        message.key?.remoteJid ||
+        message.key?.participant ||
+        message.sender ||
+        message.chatId ||
+        message.number;
+
+      const text =
+        message.text ||
+        message.body ||
+        message.conversation ||
+        message.message?.conversation ||
+        message.message?.extendedTextMessage?.text ||
+        message.caption ||
+        message.messageText ||
+        message.content ||
+        message.msg;
 
       if (!from || !text) return;
-      if (message.fromMe) return; // ignore self messages
+      if (message.fromMe || message.key?.fromMe) return; // ignore self messages
+      if (from.endsWith("@g.us")) return; // ignore group chats
 
       console.log(`📩 Incoming message from ${from}: ${text}`);
 
@@ -251,10 +282,12 @@ export class WhatsAppClient {
       console.log(`✅ Response sent to ${from}`);
     } catch (err) {
       console.error("❌ Error processing message:", err.message);
-      await this.sendMessage(
-        from,
-        "😅 Maaf, bot lagi error. Coba lagi nanti ya!"
-      );
+      if (from) {
+        await this.sendMessage(
+          from,
+          "😅 Maaf, bot lagi error. Coba lagi nanti ya!"
+        );
+      }
     }
   }
 
@@ -295,5 +328,146 @@ export class WhatsAppClient {
 
   sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Normalize status response from different gateways
+   */
+  normalizeStatusResponse(data) {
+    const state =
+      data?.state ||
+      data?.status ||
+      data?.connectionStatus ||
+      (data?.connected ? "open" : null) ||
+      (data?.isConnected ? "open" : null);
+
+    return {
+      state: state || "unknown",
+      raw: data,
+    };
+  }
+
+  /**
+   * Fallback: check if session exists in /session listing
+   */
+  async checkSessionList() {
+    try {
+      const { data } = await axios.get(`${this.baseURL}/session`);
+      const sessions = Array.isArray(data?.data) ? data.data : data;
+      if (Array.isArray(sessions) && sessions.includes(this.sessionId)) {
+        return { state: "open", raw: { via: "session_list" } };
+      }
+      return { state: "not_found" };
+    } catch (err) {
+      console.warn(
+        "⚠️ Failed to check session list:",
+        err.response?.data || err.message
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Background health check
+   */
+  startHealthCheck(interval = 15000) {
+    if (this.healthInterval) return;
+
+    const check = async () => {
+      try {
+        const status = await this.getSessionStatus();
+        const state = status.state || "unknown";
+
+        if (state !== this.lastKnownState) {
+          console.log(`📶 WhatsApp state: ${state}`);
+          this.lastKnownState = state;
+        }
+
+        if (state !== "open" && state !== "unknown") {
+          console.warn(
+            `⚠️ Session "${this.sessionId}" not open (state: ${state})`
+          );
+        }
+      } catch (err) {
+        console.warn("⚠️ Health check failed:", err.message);
+      }
+    };
+
+    this.healthInterval = setInterval(check, interval);
+    check();
+  }
+
+  stopHealthCheck() {
+    if (this.healthInterval) {
+      clearInterval(this.healthInterval);
+      this.healthInterval = null;
+    }
+  }
+
+  /**
+   * Register webhook with gateway (best effort)
+   */
+  async setupWebhook(webhookUrl) {
+    try {
+      await axios.post(`${this.baseURL}/session/${this.sessionId}/webhook`, {
+        url: webhookUrl,
+      });
+      console.log("✅ Webhook registered on WA gateway");
+    } catch (error) {
+      console.warn(
+        "⚠️ Failed to register webhook on WA gateway:",
+        this.formatAxiosError(error, "setupWebhook")
+      );
+      console.warn("   Bot will continue using polling mode.");
+    }
+  }
+
+  formatAxiosError(error, context) {
+    const status = error.response?.status;
+    const data = error.response?.data;
+    return `${context}: ${
+      status ? `${status} ` : ""
+    }${error.message}${data ? ` — ${JSON.stringify(data)}` : ""}`;
+  }
+}
+
+/**
+ * Express webhook handler — process messages pushed from WA gateway
+ */
+export async function handleWebhook(req, res) {
+  try {
+    const path = req.originalUrl || "/webhook";
+    console.log(`📨 Webhook hit: ${path}`);
+
+    if (!global.waClient) {
+      return res
+        .status(503)
+        .json({ error: "WhatsApp client not initialized yet" });
+    }
+
+    const payload = req.body;
+    if (!payload) {
+      console.warn("⚠️ Webhook received empty payload");
+      return res.status(400).json({ error: "Empty payload" });
+    }
+
+    const messages = Array.isArray(payload?.messages)
+      ? payload.messages
+      : Array.isArray(payload)
+      ? payload
+      : [payload];
+
+    if (messages.length === 0) {
+      console.warn("⚠️ Webhook received no messages");
+    }
+
+    for (const msg of messages) {
+      await global.waClient.processMessage(msg);
+    }
+
+    res.json({ status: "ok" });
+  } catch (error) {
+    console.error("❌ Webhook handling failed:", error);
+    res.status(500).json({ error: "Webhook processing failed" });
   }
 }
