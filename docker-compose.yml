@@ -8,6 +8,7 @@ services:
       - .env
     environment:
       - TZ=Asia/Jakarta
+      - WEBHOOK_BASE_URL=http://10.133.21.24:3001
     restart: unless-stopped
     networks:
       - demakai-prod-net
