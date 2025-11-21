@@ -38,29 +38,48 @@ async function simulateTyping(chat, replyText) {
 
 function cleanChromiumLocks() {
   const sessionPath = './wa-session-prod/session';
+  if (!fs.existsSync(sessionPath)) {
+    console.log("ℹ️ Session directory doesn't exist yet");
+    return;
+  }
   const lockFiles = [
     'SingletonLock',
     'SingletonSocket', 
     'SingletonCookie'
   ];
 
-  const sessionDirs = fs.readdirSync(sessionPath, { withFileTypes: true })
-    .filter(dirent => dirent.isDirectory())
-    .map(dirent => path.join(sessionPath, dirent.name));
-
-  sessionDirs.forEach(dir => {
-    lockFiles.forEach(file => {
-      const filePath = path.join(dir, file);
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log(`🧹 Removed lock file: ${filePath}`);
+  // Function to recursively find and delete lock files
+  function cleanDirectory(dir) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      
+      entries.forEach(entry => {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          // Recursively clean subdirectories
+          cleanDirectory(fullPath);
+        } else if (lockFiles.includes(entry.name)) {
+          // Delete lock file
+          try {
+            fs.unlinkSync(fullPath);
+            console.log(`🧹 Removed: ${fullPath}`);
+          } catch (err) {
+            console.warn(`⚠️ Failed to remove ${fullPath}:`, err.message);
+          }
         }
-      } catch (err) {
-        console.warn(`⚠️ Failed to remove ${file}:`, err.message);
+      });
+    } catch (err) {
+      // Ignore errors for directories that don't exist yet
+      if (err.code !== 'ENOENT') {
+        console.warn(`⚠️ Error cleaning ${dir}:`, err.message);
       }
-    });
-  });
+    }
+  }
+
+  console.log("🧹 Cleaning Chromium lock files...");
+  cleanDirectory(sessionPath);
+  console.log("✅ Lock cleanup complete");
 }
 
 /**
