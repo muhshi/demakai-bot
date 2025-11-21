@@ -440,7 +440,9 @@ export async function handleWebhook(req, res) {
     console.log(`📨 Webhook hit: ${path}`);
 
     if (!global.waClient) {
-      return res.status(503).json({ error: "WhatsApp client not initialized yet" });
+      return res
+        .status(503)
+        .json({ error: "WhatsApp client not initialized yet" });
     }
 
     const payload = req.body;
@@ -453,17 +455,28 @@ export async function handleWebhook(req, res) {
 
     let messages = [];
 
-    // 1️⃣ Format resmi wa-gateway (Baileys)
-    if (payload?.event === "message" && payload?.data?.messages) {
-      messages = payload.data.messages;
+    // 1️⃣ Format wa-gateway yang kamu pakai sekarang:
+    // { session, from, message, media: {...} }
+    if (payload?.session && payload?.from) {
+      if (!payload.message) {
+        console.log("⚠️ No message text in payload, skipping.");
+        return res.json({ status: "ignored-no-message" });
+      }
+
+      messages = [
+        {
+          from: payload.from,
+          text: payload.message,
+        },
+      ];
     }
 
-    // 2️⃣ Fallback jika gateway kirim { messages: [...] }
+    // 2️⃣ Fallback: format { messages: [...] }
     else if (Array.isArray(payload?.messages)) {
       messages = payload.messages;
     }
 
-    // 3️⃣ Format curl manual { from, text }
+    // 3️⃣ Fallback: format curl manual { from, text }
     else if (payload?.from && payload?.text) {
       messages = [
         {
@@ -489,4 +502,5 @@ export async function handleWebhook(req, res) {
     return res.status(500).json({ error: "Webhook processing failed" });
   }
 }
+
 
