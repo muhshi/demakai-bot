@@ -455,9 +455,14 @@ export async function handleWebhook(req, res) {
 
     let messages = [];
 
-    // 1️⃣ Format wa-gateway yang kamu pakai sekarang:
-    // { session, from, message, media: {...} }
+    // 1️⃣ Format wa-gateway: { session, from, message, media: {...} }
     if (payload?.session && payload?.from) {
+      // Jangan proses event dari linked device (JID @lid)
+      if (payload.from.endsWith("@lid")) {
+        console.log("ℹ️ Ignoring linked-device event (@lid).");
+        return res.json({ status: "ignored-lid" });
+      }
+
       if (!payload.message) {
         console.log("⚠️ No message text in payload, skipping.");
         return res.json({ status: "ignored-no-message" });
@@ -471,12 +476,12 @@ export async function handleWebhook(req, res) {
       ];
     }
 
-    // 2️⃣ Fallback: format { messages: [...] }
+    // 2️⃣ Fallback: { messages: [...] }
     else if (Array.isArray(payload?.messages)) {
       messages = payload.messages;
     }
 
-    // 3️⃣ Fallback: format curl manual { from, text }
+    // 3️⃣ Fallback: manual curl { from, text }
     else if (payload?.from && payload?.text) {
       messages = [
         {
@@ -502,5 +507,6 @@ export async function handleWebhook(req, res) {
     return res.status(500).json({ error: "Webhook processing failed" });
   }
 }
+
 
 
