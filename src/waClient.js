@@ -156,24 +156,35 @@ export class WhatsAppClient {
    * Send text message
    */
   async sendMessage(to, text) {
-    try {
-      const jid = to || "";
-      // Ambil bagian sebelum '@' → cocok untuk "6285...@s.whatsapp.net" maupun "1345...@lid"
-      const number = jid.includes("@") ? jid.split("@")[0] : jid;
-
-      await axios.post(`${this.baseURL}/message/send-text`, {
-        session: this.sessionId,
-        to: number,
-        text,
-      });
-      console.log(`✅ Message sent to ${number}`);
-    } catch (error) {
-      console.error(
-        "❌ Failed to send message:",
-        error.response?.data || error.message
-      );
+  try {
+    if (!to) {
+      console.error("❌ Cannot send message: 'to' is null or undefined");
+      return;
     }
+
+    const jid = to || "";
+    const number = jid.includes("@") ? jid.split("@")[0] : jid;
+
+    // Validasi: harus dimulai dengan 62
+    if (!number.startsWith("62")) {
+      console.error(`❌ Invalid phone number: ${number} (must start with 62)`);
+      return;
+    }
+
+    await axios.post(`${this.baseURL}/message/send-text`, {
+      session: this.sessionId,
+      to: number,
+      text,
+    });
+    
+    console.log(`✅ Message sent to ${number}`);
+  } catch (error) {
+    console.error(
+      "❌ Failed to send message:",
+      error.response?.data || error.message
+    );
   }
+}
 
 
   /**
@@ -225,75 +236,77 @@ export class WhatsAppClient {
    * Process incoming message (same as webhook)
    */
   async processMessage(message) {
-    try {
-      if (!message) return;
+  try {
+    if (!message) return;
 
-      const from =
-        message.from ||
-        message.remoteJid ||
-        message.key?.remoteJid ||
-        message.key?.participant ||
-        message.sender ||
-        message.chatId ||
-        message.number;
+    const from = message.from;
+    const text = message.text || message.body || message.conversation || 
+                 message.message?.conversation || 
+                 message.message?.extendedTextMessage?.text;
 
-      const text =
-        message.text ||
-        message.body ||
-        message.conversation ||
-        message.message?.conversation ||
-        message.message?.extendedTextMessage?.text ||
-        message.caption ||
-        message.messageText ||
-        message.content ||
-        message.msg;
+    // 🔧 Validasi nomor
+    if (!from) {
+      console.error("❌ Cannot process message: no valid phone number found");
+      return;
+    }
 
-      if (!from || !text) return;
-      if (message.fromMe || message.key?.fromMe) return; // ignore self messages
-      if (from.endsWith("@g.us")) return; // ignore group chats
+    if (!from.startsWith("62")) {
+      console.error(`❌ Invalid phone format: ${from} (expected 62xxx)`);
+      return;
+    }
 
-      console.log(`📩 Incoming message from ${from}: ${text}`);
+    if (!text) {
+      console.log("⚠️ No text content in message");
+      return;
+    }
 
-      // rate limit check
-      if (!(await this.checkRateLimit(from))) {
-        await this.sendMessage(
-          from,
-          "⚠️ Kamu mengirim terlalu banyak pesan. Coba lagi nanti ya!"
-        );
-        return;
+    // Ignore self/group messages
+    if (message.fromMe || message.key?.fromMe) return;
+    if (from.endsWith("@g.us")) return;
+
+    console.log(`📩 Incoming message from ${from}: ${text}`);
+
+    // Rate limit check
+    if (!(await this.checkRateLimit(from))) {
+      await this.sendMessage(
+        from,
+        "⚠️ Kamu mengirim terlalu banyak pesan. Coba lagi nanti ya!"
+      );
+      return;
+    }
+
+    const db = getDB();
+    await db.createOrUpdateSession(from, {
+      phoneNumber: from,
+      lastMessage: text,
+    });
+
+    await this.sendTyping(from);
+    const response = await handleMessage(from, text);
+
+    const maxLen = parseInt(process.env.MAX_MESSAGE_LENGTH || "4000");
+    if (response.length > maxLen) {
+      const chunks = this.splitMessage(response, maxLen);
+      for (const chunk of chunks) {
+        await this.sendMessage(from, chunk);
+        await this.sleep(800);
       }
+    } else {
+      await this.sendMessage(from, response);
+    }
 
-      const db = getDB();
-      await db.createOrUpdateSession(from, {
-        phoneNumber: from,
-        lastMessage: text,
-      });
-
-      await this.sendTyping(from);
-      const response = await handleMessage(from, text);
-
-      const maxLen = parseInt(process.env.MAX_MESSAGE_LENGTH || "4000");
-      if (response.length > maxLen) {
-        const chunks = this.splitMessage(response, maxLen);
-        for (const chunk of chunks) {
-          await this.sendMessage(from, chunk);
-          await this.sleep(800);
-        }
-      } else {
-        await this.sendMessage(from, response);
-      }
-
-      console.log(`✅ Response sent to ${from}`);
-    } catch (err) {
-      console.error("❌ Error processing message:", err.message);
-      if (from) {
-        await this.sendMessage(
-          from,
-          "😅 Maaf, bot lagi error. Coba lagi nanti ya!"
-        );
-      }
+    console.log(`✅ Response sent to ${from}`);
+  } catch (err) {
+    console.error("❌ Error processing message:", err.message);
+    const from = message?.from;
+    if (from && from.startsWith("62")) {
+      await this.sendMessage(
+        from,
+        "😅 Maaf, bot lagi error. Coba lagi nanti ya!"
+      );
     }
   }
+}
 
   /**
    * Rate limiting (anti spam)
@@ -450,7 +463,17 @@ export async function handleWebhook(req, res) {
     }
 
     const payload = req.body;
-    console.log("🔍 Raw webhook payload:", JSON.stringify(payload, null, 2));
+    
+    // 🔍 LOG LENGKAP - Cek semua field yang ada
+    console.log("🔍 Full webhook payload:", JSON.stringify(payload, null, 2));
+    console.log("🔍 Payload keys:", Object.keys(payload));
+    
+    // Cek field tambahan yang mungkin berisi nomor asli
+    if (payload.sender) console.log("📱 payload.sender:", payload.sender);
+    if (payload.participant) console.log("📱 payload.participant:", payload.participant);
+    if (payload.pushname) console.log("📱 payload.pushname:", payload.pushname);
+    if (payload.key) console.log("📱 payload.key:", JSON.stringify(payload.key, null, 2));
+    if (payload.info) console.log("📱 payload.info:", JSON.stringify(payload.info, null, 2));
 
     if (!payload) {
       console.warn("⚠️ Webhook received empty payload");
@@ -466,9 +489,15 @@ export async function handleWebhook(req, res) {
         return res.json({ status: "ignored-no-message" });
       }
 
+      // 🔧 EXTRACT NOMOR ASLI
+      const actualPhone = extractActualPhoneNumber(payload);
+      
+      console.log(`📞 Extracted phone: ${actualPhone} (from original: ${payload.from})`);
+
       messages = [
         {
-          from: payload.from,
+          from: actualPhone, // Gunakan nomor asli
+          originalFrom: payload.from, // Simpan JID asli untuk referensi
           text: payload.message,
         },
       ];
@@ -481,9 +510,11 @@ export async function handleWebhook(req, res) {
 
     // Fallback: manual curl { from, text }
     else if (payload?.from && payload?.text) {
+      const actualPhone = extractActualPhoneNumber(payload);
       messages = [
         {
-          from: payload.from,
+          from: actualPhone,
+          originalFrom: payload.from,
           text: payload.text,
         },
       ];
@@ -505,6 +536,54 @@ export async function handleWebhook(req, res) {
   }
 }
 
+/**
+ * 🔧 Extract nomor WhatsApp asli dari webhook payload
+ * Prioritas:
+ * 1. key.remoteJid (format 628xxx@s.whatsapp.net)
+ * 2. participant
+ * 3. sender
+ * 4. info.remoteJid
+ * 5. from (fallback, bisa jadi @lid)
+ */
+function extractActualPhoneNumber(payload) {
+  // 1. Cek key.remoteJid (paling reliable)
+  if (payload.key?.remoteJid) {
+    const jid = payload.key.remoteJid;
+    if (jid.includes("@s.whatsapp.net")) {
+      return jid.split("@")[0]; // Return 628xxx
+    }
+  }
+
+  // 2. Cek participant
+  if (payload.participant) {
+    return payload.participant.split("@")[0];
+  }
+
+  // 3. Cek sender
+  if (payload.sender) {
+    return payload.sender.split("@")[0];
+  }
+
+  // 4. Cek info.remoteJid
+  if (payload.info?.remoteJid) {
+    return payload.info.remoteJid.split("@")[0];
+  }
+
+  // 5. Fallback ke from (mungkin @lid, tapi tetap coba)
+  if (payload.from) {
+    const num = payload.from.split("@")[0];
+    
+    // Jika @lid (biasanya angka panjang non-62), skip
+    if (!num.startsWith("62") && num.length > 12) {
+      console.warn(`⚠️ Cannot extract phone from @lid: ${payload.from}`);
+      return null; // Return null, biar bisa detect error
+    }
+    
+    return num;
+  }
+
+  return null;
+}
 
 
 
