@@ -7,9 +7,7 @@ import dns from "dns";
 
 
 dns.setDefaultResultOrder("ipv4first");
-import express from "express";
-import { connectDB, disconnectDB } from "./db.js";
-import { checkOllamaHealth } from "./embedding.js";
+
 
 /**
  * Main entry point — DemakAI WhatsApp Bot
