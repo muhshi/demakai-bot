@@ -11,6 +11,9 @@ services:
     restart: unless-stopped
     networks:
       - demakai-prod-net
+    volumes:
+      - ./wa-session-prod:/app/wa-session-prod  # 🆕 Tambahkan ini
+      - ./logs:/app/logs                         # 🆕 Optional: untuk logs
 
 networks:
   demakai-prod-net:
