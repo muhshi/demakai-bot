@@ -44,16 +44,22 @@ function cleanChromiumLocks() {
     'SingletonCookie'
   ];
 
-  lockFiles.forEach(file => {
-    const filePath = path.join(sessionPath, file);
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log(`🧹 Removed lock file: ${file}`);
+  const sessionDirs = fs.readdirSync(sessionPath, { withFileTypes: true })
+    .filter(dirent => dirent.isDirectory())
+    .map(dirent => path.join(sessionPath, dirent.name));
+
+  sessionDirs.forEach(dir => {
+    lockFiles.forEach(file => {
+      const filePath = path.join(dir, file);
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`🧹 Removed lock file: ${filePath}`);
+        }
+      } catch (err) {
+        console.warn(`⚠️ Failed to remove ${file}:`, err.message);
       }
-    } catch (err) {
-      console.warn(`⚠️ Failed to remove ${file}:`, err.message);
-    }
+    });
   });
 }
 
@@ -65,7 +71,11 @@ export async function startProdWebBot() {
   console.log("🚀 Starting Production Bot (whatsapp-web.js)...\n");
 
   // 🆕 Clean locks before starting
-  cleanChromiumLocks();
+  try {
+    cleanChromiumLocks();
+  } catch (err) {
+    console.warn("⚠️ Failed to clean locks:", err.message);
+  }
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -73,7 +83,6 @@ export async function startProdWebBot() {
     }),
     puppeteer: {
       headless: true,
-      userDataDir: "./wa-session-prod/chromium-data", 
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -84,7 +93,6 @@ export async function startProdWebBot() {
         "--disable-gpu",
         "--single-process",
         "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process", 
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
     },

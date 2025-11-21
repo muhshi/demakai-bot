@@ -98,7 +98,9 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
       }
     }
 
-    const GEMINI_ERROR_STATUS_FOR_ROTATE = [402, 403, 429];
+    const GEMINI_ERROR_STATUS_FOR_ROTATE = [402, 403, 429, 500, 503];
+    // Track failed keys untuk skip di retry berikutnya
+    const failedKeys = new Set();
 
     // ---- 1️⃣ GEMINI ----
     if (base.includes("generativelanguage.googleapis.com")) {
@@ -109,9 +111,18 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
       }
 
       let lastError;
+      let successCount = 0;
+      let failCount = 0;
 
       for (let i = 0; i < GEMINI_KEYS.length; i++) {
         const key = GEMINI_KEYS[i];
+        
+        // Skip key yang sudah failed sebelumnya (di session ini)
+        if (failedKeys.has(key)) {
+          console.log(`⏭️ Skipping key ${i + 1} (previously failed)`);
+          continue;
+        }
+
         console.log(`🔑 Trying Gemini key ${i + 1}/${GEMINI_KEYS.length}`);
 
         try {
@@ -128,43 +139,73 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
             {
               headers: { "Content-Type": "application/json" },
               timeout: TIMEOUTS.ollama_request,
+              validateStatus: (status) => status < 500, // 🔧 Jangan throw otomatis untuk 4xx
             }
           );
+
+          const status = resp.status;
+
+          // Handle error responses
+          if (status >= 400) {
+            throw {
+              response: resp,
+              message: `HTTP ${status}`,
+            };
+          }
 
           const text =
             resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
           if (!text) {
             console.warn("⚠️ Empty response from Gemini.");
+            // 🔧 Coba key lain kalau response kosong
+            lastError = new Error("Empty response");
+            continue;
           }
 
+          successCount++;
+          console.log(`✅ Gemini key ${i + 1} successful`);
           return text;
+
         } catch (err) {
           lastError = err;
+          failCount++;
 
           const status = err.response?.status;
           const data = err.response?.data;
+          const errorMsg = data?.error?.message || err.message;
 
           console.warn(
-            `⚠️ Gemini key #${i + 1} failed (status ${status || "no-status"}), ${
-              i < GEMINI_KEYS.length - 1
-                ? "trying next key..."
-                : "no more keys to try."
-            }`
+            `❌ Gemini key #${i + 1} failed (HTTP ${status || "network error"})`
           );
+          console.warn(`   Error: ${errorMsg}`);
 
-          // Kalau error-nya bukan terkait kuota/rate limit, langsung lempar
-          if (!GEMINI_ERROR_STATUS_FOR_ROTATE.includes(status)) {
-            throw err;
+          // 🔧 Tandai key sebagai failed untuk rate limit errors
+          if (GEMINI_ERROR_STATUS_FOR_ROTATE.includes(status)) {
+            failedKeys.add(key);
+            console.warn(`   ⚠️ Key ${i + 1} marked as failed (rate limit/quota)`);
           }
 
-          // Kalau status 402/403/429 → lanjut ke key berikutnya
-          console.warn("   Error detail:", data || err.message);
+          // 🔧 Untuk network errors atau server errors, coba key lain
+          if (!status || status >= 500) {
+            console.warn(`   🔄 Retrying with next key (network/server error)`);
+            continue;
+          }
+
+          // 🔧 Kalau masih ada key lain, coba lagi
+          if (i < GEMINI_KEYS.length - 1) {
+            console.warn(`   🔄 Trying next key...`);
+            continue;
+          }
+
+          // Semua key habis
+          console.error(`   ❌ No more keys to try`);
         }
       }
 
       // Semua key gagal
-      throw lastError || new Error("All Gemini API keys failed.");
+      console.error(`📊 Final stats: ${successCount} success, ${failCount} failed`);
+      throw lastError || new Error(`All ${GEMINI_KEYS.length} Gemini API keys failed.`);
     }
 
     // ---- 2️⃣ OPENAI (GPT) ----
