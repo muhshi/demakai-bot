@@ -106,21 +106,17 @@ export async function startProdWebBot() {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
         '--no-first-run',
         '--no-zygote',
-        '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins',
-        '--disable-site-isolation-trials',
-        '--disable-features=BlockInsecurePrivateNetworkRequests',
       ],
-      
+      executablePath: '/usr/bin/chromium-browser',
+      // 🆕 Tambahkan timeout
+      timeout: 60000, // 60 detik
     },
   });
 
-  // QR Code event (hanya untuk first setup)
+  // QR Code event
   client.on("qr", (qr) => {
     console.log("📱 PRODUCTION: Scan QR code untuk setup:\n");
     qrcode.generate(qr, { small: true });
@@ -150,44 +146,55 @@ export async function startProdWebBot() {
     console.error("❌ Authentication failed:", msg);
   });
 
-  // Disconnected
+  // Disconnected with auto-reconnect
   client.on("disconnected", (reason) => {
     console.log("📴 Bot disconnected:", reason);
     global.waClient = { isReady: false };
+    
+    // 🆕 Auto-reconnect
+    console.log("🔄 Attempting to reconnect in 10 seconds...");
+    setTimeout(async () => {
+      try {
+        cleanChromiumLocks();
+        await client.initialize();
+        console.log("✅ Reconnected successfully!");
+      } catch (error) {
+        console.error("❌ Reconnection failed:", error.message);
+      }
+    }, 10000);
+  });
+
+  // 🆕 Loading event (untuk debug)
+  client.on("loading_screen", (percent, message) => {
+    console.log(`⏳ Loading: ${percent}% - ${message}`);
   });
 
   // Message handler
   client.on("message", async (msg) => {
     try {
-      const from = msg.from; // ✅ SELALU nomor asli! (628xxx@s.whatsapp.net)
+      const from = msg.from;
       const text = msg.body.trim();
       const isGroup = msg.from.endsWith("@g.us");
 
-      // Ignore group messages
       if (isGroup) {
         console.log(`📢 Group message ignored: ${from}`);
         return;
       }
 
-      // Ignore empty messages
       if (!text || text.length === 0) return;
 
-      // Ignore media messages
       if (msg.hasMedia) {
         console.log(`🖼️ Media message from ${from} (not supported)`);
         await msg.reply("Maaf, saat ini saya hanya bisa memproses pesan teks.");
         return;
       }
 
-      // Ignore messages from self
       if (msg.fromMe) return;
 
-      // Extract nomor tanpa @s.whatsapp.net
       const phoneNumber = from.split("@")[0];
       
       console.log(`📩 Incoming message from ${phoneNumber}: ${text}`);
 
-      // Rate limiting check
       const db = getDB();
       const session = await db.getSession(from);
 
@@ -200,7 +207,6 @@ export async function startProdWebBot() {
         }
       }
 
-      // Update session
       await db.createOrUpdateSession(from, {
         phoneNumber: phoneNumber,
         metadata: {
@@ -209,21 +215,16 @@ export async function startProdWebBot() {
         },
       });
 
-      // Mark as online and read
       await client.sendPresenceAvailable();
       await client.sendSeen(from);
 
-      // Process message
       const reply = await handleMessage(from, text);
 
-      // Simulate typing
       const chat = await msg.getChat();
       await simulateTyping(chat, reply);
 
-      // Send reply
       await msg.reply(reply);
 
-      // Increment message count
       await db.incrementMessageCount(from);
 
       console.log(`✅ Response sent to ${phoneNumber}\n`);
@@ -238,11 +239,12 @@ export async function startProdWebBot() {
   });
 
   // Initialize
+  console.log("🔄 Initializing WhatsApp client...");
   await client.initialize();
 
   // Graceful shutdown
   process.on("SIGINT", async () => {
-    console.log("\n📴 Shutting down...");
+    console.log("\n📴 Shutting down gracefully...");
     await client.destroy();
     process.exit(0);
   });

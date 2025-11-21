@@ -1,9 +1,22 @@
-FROM ghcr.io/puppeteer/puppeteer:21.6.1
+FROM node:20-alpine
 
-# Switch ke root untuk install dependencies
-USER root
+# Install Chromium dan dependencies
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    font-noto-emoji
 
-# Install Node.js dependencies
+# Set Puppeteer environment
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    CHROME_BIN=/usr/bin/chromium-browser \
+    CHROME_PATH=/usr/lib/chromium/
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -12,12 +25,9 @@ RUN npm install --omit=dev
 
 COPY . .
 
-# Create directory untuk session storage
+# Create session directory with proper permissions
 RUN mkdir -p /app/wa-session-prod && \
-    chown -R pptruser:pptruser /app
-
-# Switch back to puppeteer user
-USER pptruser
+    chmod 777 /app/wa-session-prod
 
 EXPOSE 3000
 
