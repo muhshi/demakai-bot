@@ -17,6 +17,95 @@ export class WhatsAppClient {
     this.lastKnownState = null;
     this.retryCount = 0;
     this.maxRetries = 5;
+    this.jidCache = new Map();
+  }
+
+  /**
+   * 🔧 Resolve JID dengan caching
+   */
+  async resolveJidToPhone(jid) {
+    try {
+      // Cek cache dulu
+      if (this.jidCache.has(jid)) {
+        const cached = this.jidCache.get(jid);
+        console.log(`💾 Using cached phone for ${jid}: ${cached}`);
+        return cached;
+      }
+
+      // Jika sudah format nomor biasa (62xxx), langsung return
+      if (!jid.includes("@")) {
+        if (jid.startsWith("62")) {
+          this.jidCache.set(jid, jid);
+          return jid;
+        }
+        return null;
+      }
+
+      // Jika sudah @s.whatsapp.net, extract aja
+      if (jid.includes("@s.whatsapp.net")) {
+        const phone = jid.split("@")[0];
+        this.jidCache.set(jid, phone);
+        return phone;
+      }
+
+      // Jika @lid, coba resolve via API
+      console.log(`🔍 Resolving JID: ${jid}`);
+
+      // Coba endpoint /contact/info
+      try {
+        const { data } = await axios.get(`${this.baseURL}/contact/info`, {
+          params: {
+            session: this.sessionId,
+            jid: jid,
+          },
+        });
+
+        console.log("📱 Contact info response:", JSON.stringify(data, null, 2));
+
+        const phone = 
+          data?.phone ||
+          data?.number ||
+          data?.id?.split("@")[0] ||
+          data?.jid?.split("@")[0] ||
+          data?.data?.phone ||
+          data?.data?.number;
+
+        if (phone && phone.startsWith("62")) {
+          console.log(`✅ Resolved ${jid} → ${phone}`);
+          this.jidCache.set(jid, phone); // 💾 Cache result
+          return phone;
+        }
+      } catch (err) {
+        console.warn("⚠️ /contact/info failed:", err.message);
+      }
+
+      // Fallback: coba endpoint /contact/check-exists
+      try {
+        const { data } = await axios.post(`${this.baseURL}/contact/check-exists`, {
+          session: this.sessionId,
+          jid: jid,
+        });
+
+        console.log("📱 Check exists response:", JSON.stringify(data, null, 2));
+
+        const phone = data?.phone || data?.number || data?.jid?.split("@")[0];
+
+        if (phone && phone.startsWith("62")) {
+          console.log(`✅ Resolved ${jid} → ${phone}`);
+          this.jidCache.set(jid, phone); // 💾 Cache result
+          return phone;
+        }
+      } catch (err) {
+        console.warn("⚠️ /contact/check-exists failed:", err.message);
+      }
+
+      console.error(`❌ Cannot resolve JID: ${jid}`);
+      return null;
+
+    } catch (error) {
+      console.error(`❌ Error resolving JID ${jid}:`, error.message);
+      return null;
+    }
   }
 
   /**
@@ -385,6 +474,82 @@ export class WhatsAppClient {
   }
 
   /**
+ * 🔧 Resolve JID (@lid atau @s.whatsapp.net) ke nomor WhatsApp asli
+ * Menggunakan endpoint /contact dari wa-gateway
+ */
+async resolveJidToPhone(jid) {
+  try {
+    // Jika sudah format nomor biasa (62xxx), langsung return
+    if (!jid.includes("@")) {
+      return jid.startsWith("62") ? jid : null;
+    }
+
+    // Jika sudah @s.whatsapp.net, extract aja
+    if (jid.includes("@s.whatsapp.net")) {
+      return jid.split("@")[0];
+    }
+
+    // Jika @lid, coba resolve via API
+    console.log(`🔍 Resolving JID: ${jid}`);
+
+    // Coba endpoint /contact/info
+    try {
+      const { data } = await axios.get(`${this.baseURL}/contact/info`, {
+        params: {
+          session: this.sessionId,
+          jid: jid,
+        },
+      });
+
+      console.log("📱 Contact info response:", JSON.stringify(data, null, 2));
+
+      // Extract nomor dari response
+      const phone = 
+        data?.phone ||
+        data?.number ||
+        data?.id?.split("@")[0] ||
+        data?.jid?.split("@")[0] ||
+        data?.data?.phone ||
+        data?.data?.number;
+
+      if (phone && phone.startsWith("62")) {
+        console.log(`✅ Resolved ${jid} → ${phone}`);
+        return phone;
+      }
+    } catch (err) {
+      console.warn("⚠️ /contact/info failed, trying alternative...");
+    }
+
+    // Fallback: coba endpoint /contact/check-exists
+    try {
+      const { data } = await axios.post(`${this.baseURL}/contact/check-exists`, {
+        session: this.sessionId,
+        jid: jid,
+      });
+
+      console.log("📱 Check exists response:", JSON.stringify(data, null, 2));
+
+      const phone = data?.phone || data?.number || data?.jid?.split("@")[0];
+
+      if (phone && phone.startsWith("62")) {
+        console.log(`✅ Resolved ${jid} → ${phone}`);
+        return phone;
+      }
+    } catch (err) {
+      console.warn("⚠️ /contact/check-exists failed");
+    }
+
+    // Jika semua gagal, return null
+    console.error(`❌ Cannot resolve JID: ${jid}`);
+    return null;
+
+  } catch (error) {
+    console.error(`❌ Error resolving JID ${jid}:`, error.message);
+    return null;
+  }
+}
+
+  /**
    * Background health check
    */
   startHealthCheck(interval = 15000) {
@@ -464,16 +629,8 @@ export async function handleWebhook(req, res) {
 
     const payload = req.body;
     
-    // 🔍 LOG LENGKAP - Cek semua field yang ada
     console.log("🔍 Full webhook payload:", JSON.stringify(payload, null, 2));
     console.log("🔍 Payload keys:", Object.keys(payload));
-    
-    // Cek field tambahan yang mungkin berisi nomor asli
-    if (payload.sender) console.log("📱 payload.sender:", payload.sender);
-    if (payload.participant) console.log("📱 payload.participant:", payload.participant);
-    if (payload.pushname) console.log("📱 payload.pushname:", payload.pushname);
-    if (payload.key) console.log("📱 payload.key:", JSON.stringify(payload.key, null, 2));
-    if (payload.info) console.log("📱 payload.info:", JSON.stringify(payload.info, null, 2));
 
     if (!payload) {
       console.warn("⚠️ Webhook received empty payload");
@@ -489,15 +646,40 @@ export async function handleWebhook(req, res) {
         return res.json({ status: "ignored-no-message" });
       }
 
-      // 🔧 EXTRACT NOMOR ASLI
-      const actualPhone = extractActualPhoneNumber(payload);
+      // 🔧 EXTRACT JID (bisa @lid atau @s.whatsapp.net)
+      const jidOrPhone = extractActualPhoneNumber(payload);
       
-      console.log(`📞 Extracted phone: ${actualPhone} (from original: ${payload.from})`);
+      console.log(`📞 Extracted JID/Phone: ${jidOrPhone}`);
+
+      // 🔧 RESOLVE ke nomor asli jika perlu
+      let actualPhone = jidOrPhone;
+      
+      if (jidOrPhone) {
+        // Jika @lid atau @s.whatsapp.net, resolve
+        if (jidOrPhone.includes("@")) {
+          actualPhone = await global.waClient.resolveJidToPhone(jidOrPhone);
+        }
+        // Jika sudah format 62xxx, skip resolve
+        else if (jidOrPhone.startsWith("62")) {
+          actualPhone = jidOrPhone;
+        }
+        // Jika format lain, coba resolve
+        else {
+          actualPhone = await global.waClient.resolveJidToPhone(jidOrPhone);
+        }
+      }
+
+      if (!actualPhone) {
+        console.error(`❌ Cannot resolve phone number from: ${jidOrPhone}`);
+        return res.json({ status: "ignored-cannot-resolve-phone" });
+      }
+
+      console.log(`✅ Final phone number: ${actualPhone}`);
 
       messages = [
         {
-          from: actualPhone, // Gunakan nomor asli
-          originalFrom: payload.from, // Simpan JID asli untuk referensi
+          from: actualPhone,
+          originalFrom: payload.from,
           text: payload.message,
         },
       ];
@@ -510,7 +692,18 @@ export async function handleWebhook(req, res) {
 
     // Fallback: manual curl { from, text }
     else if (payload?.from && payload?.text) {
-      const actualPhone = extractActualPhoneNumber(payload);
+      const jidOrPhone = extractActualPhoneNumber(payload);
+      let actualPhone = jidOrPhone;
+      
+      if (jidOrPhone?.includes("@")) {
+        actualPhone = await global.waClient.resolveJidToPhone(jidOrPhone);
+      }
+
+      if (!actualPhone) {
+        console.error(`❌ Cannot resolve phone number from: ${jidOrPhone}`);
+        return res.json({ status: "ignored-cannot-resolve-phone" });
+      }
+
       messages = [
         {
           from: actualPhone,
@@ -538,51 +731,34 @@ export async function handleWebhook(req, res) {
 
 /**
  * 🔧 Extract nomor WhatsApp asli dari webhook payload
- * Prioritas:
- * 1. key.remoteJid (format 628xxx@s.whatsapp.net)
- * 2. participant
- * 3. sender
- * 4. info.remoteJid
- * 5. from (fallback, bisa jadi @lid)
+ * Jika tidak ketemu, return JID asli untuk di-resolve nanti
  */
 function extractActualPhoneNumber(payload) {
   // 1. Cek key.remoteJid (paling reliable)
   if (payload.key?.remoteJid) {
     const jid = payload.key.remoteJid;
     if (jid.includes("@s.whatsapp.net")) {
-      return jid.split("@")[0]; // Return 628xxx
+      return jid.split("@")[0];
     }
   }
 
   // 2. Cek participant
   if (payload.participant) {
-    return payload.participant.split("@")[0];
+    return payload.participant;
   }
 
   // 3. Cek sender
   if (payload.sender) {
-    return payload.sender.split("@")[0];
+    return payload.sender;
   }
 
   // 4. Cek info.remoteJid
   if (payload.info?.remoteJid) {
-    return payload.info.remoteJid.split("@")[0];
+    return payload.info.remoteJid;
   }
 
-  // 5. Fallback ke from (mungkin @lid, tapi tetap coba)
-  if (payload.from) {
-    const num = payload.from.split("@")[0];
-    
-    // Jika @lid (biasanya angka panjang non-62), skip
-    if (!num.startsWith("62") && num.length > 12) {
-      console.warn(`⚠️ Cannot extract phone from @lid: ${payload.from}`);
-      return null; // Return null, biar bisa detect error
-    }
-    
-    return num;
-  }
-
-  return null;
+  // 5. Return from (bisa @lid atau @s.whatsapp.net)
+  return payload.from || null;
 }
 
 
