@@ -1,8 +1,9 @@
 FROM node:20-bullseye-slim
 
-# Install Chromium dan dependencies
+# Install Chromium & dependencies
 RUN apt-get update && apt-get install -y \
     chromium \
+    chromium-driver \
     fonts-ipafont-gothic \
     fonts-wqy-zenhei \
     fonts-thai-tlwg \
@@ -18,14 +19,11 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 WORKDIR /app
 
 COPY package*.json ./
-
 RUN npm install --omit=dev
 
 COPY . .
 
-RUN mkdir -p /app/wa-session-prod && \
-    chmod 777 /app/wa-session-prod
+RUN mkdir -p /app/wa-session-prod && chmod 777 /app/wa-session-prod
 
 EXPOSE 3000
-
 CMD ["npm", "run", "start:mode"]

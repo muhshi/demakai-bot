@@ -110,7 +110,7 @@ export async function startProdWebBot() {
         '--no-first-run',
         '--no-zygote',
       ],
-      executablePath: '/usr/bin/chromium-browser',
+      executablePath: '/usr/bin/chromium',
       // 🆕 Tambahkan timeout
       timeout: 60000, // 60 detik
     },

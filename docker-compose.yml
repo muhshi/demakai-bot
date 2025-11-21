@@ -14,12 +14,7 @@ services:
     volumes:
       - ./wa-session-prod:/app/wa-session-prod
     shm_size: '2gb'
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 512M
+
 
 networks:
   demakai-prod-net:
