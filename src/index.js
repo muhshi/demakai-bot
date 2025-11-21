@@ -44,7 +44,8 @@ async function main() {
 
   // 5️⃣ Start bot
   if (MODE === "dev") await startDevMode();
-  else await startProdMode();
+  else if (MODE === "prod-web") await startProdWebMode(); // 🆕 Mode baru
+  else await startProdMode()
 
   // 6️⃣ Graceful shutdown
   setupGracefulShutdown();
@@ -107,6 +108,67 @@ async function startDevMode() {
     console.error("❌ Failed to start dev bot:", error.message);
     process.exit(1);
   }
+}
+
+/**
+ * PRODUCTION MODE (whatsapp-web.js)
+ * Lebih reliable dari wa-gateway untuk multi-user
+ */
+async function startProdWebMode() {
+  console.log("🚀 Starting in PRODUCTION mode (whatsapp-web.js)...\n");
+  
+  const { startProdWebBot } = await import("./wa.bot.js");
+
+  try {
+    await startProdWebBot();
+  } catch (error) {
+    console.error("❌ Failed to start production bot:", error.message);
+    process.exit(1);
+  }
+
+  // Health check endpoint tetap bisa jalan
+  const app = express();
+  app.use(express.json());
+
+  app.get("/health", async (req, res) => {
+    const ollamaHealth = await checkOllamaHealth();
+    const base = process.env.LLM_BASE_URL || "";
+    const model = process.env.LLM_MODEL || "Unknown";
+
+    let provider = "Tidak diketahui";
+    if (base.includes("googleapis")) provider = "Gemini API (Google)";
+    else if (base.includes("openai.com")) provider = "OpenAI API";
+    else if (base.includes("groq")) provider = "Groq API";
+    else if (base.includes("localhost") || base.includes("11434"))
+      provider = "Ollama Lokal";
+
+    res.json({
+      status: "ok",
+      mode: "production-web",
+      whatsapp: {
+        ready: global.waClient?.isReady || false,
+        client: "whatsapp-web.js",
+      },
+      embedding: {
+        available: ollamaHealth.available,
+        model: process.env.EMBEDDING_MODEL,
+      },
+      llm: {
+        provider,
+        base_url: base,
+        model,
+      },
+    });
+  });
+
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`✅ Health check server running on port ${PORT}`);
+    console.log(`   Health check: http://localhost:${PORT}/health\n`);
+  });
+
+  console.log("✨ Production mode ready!");
+  console.log("📱 Bot is now listening for messages via WhatsApp Web\n");
 }
 
 /**

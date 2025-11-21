@@ -35,6 +35,161 @@ async function simulateTyping(chat, replyText) {
 }
 
 /**
+ * Start WhatsApp bot untuk PRODUCTION
+ * Sama seperti dev, tapi tanpa response time counter dan dengan config production
+ */
+export async function startProdWebBot() {
+  console.log("🚀 Starting Production Bot (whatsapp-web.js)...\n");
+
+  const client = new Client({
+    authStrategy: new LocalAuth({
+      dataPath: "./wa-session-prod", // Folder khusus untuk production
+    }),
+    puppeteer: {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+      ],
+    },
+  });
+
+  // QR Code event (hanya untuk first setup)
+  client.on("qr", (qr) => {
+    console.log("📱 PRODUCTION: Scan QR code untuk setup:\n");
+    qrcode.generate(qr, { small: true });
+    console.log("\n⏳ Menunggu scan...\n");
+  });
+
+  // Ready event
+  client.on("ready", () => {
+    console.log("✅ WhatsApp Production Bot Ready!");
+    console.log(`📱 Connected as: ${client.info.pushname}`);
+    console.log(`📞 Number: ${client.info.wid.user}\n`);
+    console.log("🎉 Bot is now listening for messages...\n");
+    
+    global.waClient = {
+      isReady: true,
+      info: client.info,
+    };
+  });
+
+  // Authenticated
+  client.on("authenticated", () => {
+    console.log("🔐 Authentication successful");
+  });
+
+  // Auth failure
+  client.on("auth_failure", (msg) => {
+    console.error("❌ Authentication failed:", msg);
+  });
+
+  // Disconnected
+  client.on("disconnected", (reason) => {
+    console.log("📴 Bot disconnected:", reason);
+    global.waClient = { isReady: false };
+  });
+
+  // Message handler
+  client.on("message", async (msg) => {
+    try {
+      const from = msg.from; // ✅ SELALU nomor asli! (628xxx@s.whatsapp.net)
+      const text = msg.body.trim();
+      const isGroup = msg.from.endsWith("@g.us");
+
+      // Ignore group messages
+      if (isGroup) {
+        console.log(`📢 Group message ignored: ${from}`);
+        return;
+      }
+
+      // Ignore empty messages
+      if (!text || text.length === 0) return;
+
+      // Ignore media messages
+      if (msg.hasMedia) {
+        console.log(`🖼️ Media message from ${from} (not supported)`);
+        await msg.reply("Maaf, saat ini saya hanya bisa memproses pesan teks.");
+        return;
+      }
+
+      // Ignore messages from self
+      if (msg.fromMe) return;
+
+      // Extract nomor tanpa @s.whatsapp.net
+      const phoneNumber = from.split("@")[0];
+      
+      console.log(`📩 Incoming message from ${phoneNumber}: ${text}`);
+
+      // Rate limiting check
+      const db = getDB();
+      const session = await db.getSession(from);
+
+      if (session?.metadata?.lastMessageTime) {
+        const timeSinceLastMessage =
+          Date.now() - session.metadata.lastMessageTime;
+        if (timeSinceLastMessage < 2000) {
+          console.log(`⚠️ Rate limit: ${phoneNumber}`);
+          return;
+        }
+      }
+
+      // Update session
+      await db.createOrUpdateSession(from, {
+        phoneNumber: phoneNumber,
+        metadata: {
+          ...session?.metadata,
+          lastMessageTime: Date.now(),
+        },
+      });
+
+      // Mark as online and read
+      await client.sendPresenceAvailable();
+      await client.sendSeen(from);
+
+      // Process message
+      const reply = await handleMessage(from, text);
+
+      // Simulate typing
+      const chat = await msg.getChat();
+      await simulateTyping(chat, reply);
+
+      // Send reply
+      await msg.reply(reply);
+
+      // Increment message count
+      await db.incrementMessageCount(from);
+
+      console.log(`✅ Response sent to ${phoneNumber}\n`);
+    } catch (error) {
+      console.error("❌ Error handling message:", error);
+      try {
+        await msg.reply("Maaf, ada kendala teknis. Coba lagi ya!");
+      } catch (replyError) {
+        console.error("❌ Failed to send error message:", replyError);
+      }
+    }
+  });
+
+  // Initialize
+  await client.initialize();
+
+  // Graceful shutdown
+  process.on("SIGINT", async () => {
+    console.log("\n📴 Shutting down...");
+    await client.destroy();
+    process.exit(0);
+  });
+
+  return client;
+}
+
+/**
  * Start WhatsApp bot untuk development/testing
  * Pakai whatsapp-web.js dengan QR scan
  */
