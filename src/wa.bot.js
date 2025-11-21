@@ -2,6 +2,8 @@ import pkg from "whatsapp-web.js";
 import qrcode from "qrcode-terminal";
 import { handleMessage } from "./handlers.js";
 import { getDB } from "./db.js";
+import fs from 'fs';
+import path from 'path';
 
 const { Client, LocalAuth } = pkg;
 
@@ -34,6 +36,27 @@ async function simulateTyping(chat, replyText) {
   }
 }
 
+function cleanChromiumLocks() {
+  const sessionPath = './wa-session-prod/session';
+  const lockFiles = [
+    'SingletonLock',
+    'SingletonSocket', 
+    'SingletonCookie'
+  ];
+
+  lockFiles.forEach(file => {
+    const filePath = path.join(sessionPath, file);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`🧹 Removed lock file: ${file}`);
+      }
+    } catch (err) {
+      console.warn(`⚠️ Failed to remove ${file}:`, err.message);
+    }
+  });
+}
+
 /**
  * Start WhatsApp bot untuk PRODUCTION
  * Sama seperti dev, tapi tanpa response time counter dan dengan config production
@@ -41,13 +64,16 @@ async function simulateTyping(chat, replyText) {
 export async function startProdWebBot() {
   console.log("🚀 Starting Production Bot (whatsapp-web.js)...\n");
 
+  // 🆕 Clean locks before starting
+  cleanChromiumLocks();
+
   const client = new Client({
     authStrategy: new LocalAuth({
       dataPath: "./wa-session-prod",
     }),
     puppeteer: {
       headless: true,
-      userDataDir: "./wa-session-prod/chromium-data", // 🆕 Tambahkan ini
+      userDataDir: "./wa-session-prod/chromium-data", 
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -58,7 +84,7 @@ export async function startProdWebBot() {
         "--disable-gpu",
         "--single-process",
         "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process", // 🆕 Tambahkan ini
+        "--disable-features=IsolateOrigins,site-per-process", 
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
     },

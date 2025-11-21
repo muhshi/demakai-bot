@@ -86,26 +86,85 @@ async function callOllama(systemPrompt, userPrompt, history = []) {
       { role: "user", content: String(userPrompt ?? "") },
     ];
 
+    const GEMINI_KEYS = (process.env.GEMINI_API_KEYS || "")
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+
+    if (!GEMINI_KEYS.length) {
+      console.warn("⚠️ No GEMINI_API_KEYS set. Falling back to GEMINI_API_KEY (single).");
+      if (process.env.GEMINI_API_KEY) {
+        GEMINI_KEYS.push(process.env.GEMINI_API_KEY);
+      }
+    }
+
+    const GEMINI_ERROR_STATUS_FOR_ROTATE = [402, 403, 429];
+
     // ---- 1️⃣ GEMINI ----
     if (base.includes("generativelanguage.googleapis.com")) {
       console.log("⚡ Provider: Gemini API");
-      const resp = await axios.post(
-        `${base}${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          contents: [
-            {
-              role: "user",
-              parts: messages.map((m) => ({ text: m.content })),
-            },
-          ],
-        },
-        {
-          headers: { "Content-Type": "application/json" },
-          timeout: TIMEOUTS.ollama_request,
-        }
-      );
 
-      return resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (!GEMINI_KEYS.length) {
+        throw new Error("No Gemini API key configured.");
+      }
+
+      let lastError;
+
+      for (let i = 0; i < GEMINI_KEYS.length; i++) {
+        const key = GEMINI_KEYS[i];
+        console.log(`🔑 Trying Gemini key ${i + 1}/${GEMINI_KEYS.length}`);
+
+        try {
+          const resp = await axios.post(
+            `${base}${model}:generateContent?key=${key}`,
+            {
+              contents: [
+                {
+                  role: "user",
+                  parts: messages.map((m) => ({ text: m.content })),
+                },
+              ],
+            },
+            {
+              headers: { "Content-Type": "application/json" },
+              timeout: TIMEOUTS.ollama_request,
+            }
+          );
+
+          const text =
+            resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+          if (!text) {
+            console.warn("⚠️ Empty response from Gemini.");
+          }
+
+          return text;
+        } catch (err) {
+          lastError = err;
+
+          const status = err.response?.status;
+          const data = err.response?.data;
+
+          console.warn(
+            `⚠️ Gemini key #${i + 1} failed (status ${status || "no-status"}), ${
+              i < GEMINI_KEYS.length - 1
+                ? "trying next key..."
+                : "no more keys to try."
+            }`
+          );
+
+          // Kalau error-nya bukan terkait kuota/rate limit, langsung lempar
+          if (!GEMINI_ERROR_STATUS_FOR_ROTATE.includes(status)) {
+            throw err;
+          }
+
+          // Kalau status 402/403/429 → lanjut ke key berikutnya
+          console.warn("   Error detail:", data || err.message);
+        }
+      }
+
+      // Semua key gagal
+      throw lastError || new Error("All Gemini API keys failed.");
     }
 
     // ---- 2️⃣ OPENAI (GPT) ----
