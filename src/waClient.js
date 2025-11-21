@@ -440,34 +440,53 @@ export async function handleWebhook(req, res) {
     console.log(`📨 Webhook hit: ${path}`);
 
     if (!global.waClient) {
-      return res
-        .status(503)
-        .json({ error: "WhatsApp client not initialized yet" });
+      return res.status(503).json({ error: "WhatsApp client not initialized yet" });
     }
 
     const payload = req.body;
+    console.log("🔍 Raw webhook payload:", JSON.stringify(payload, null, 2));
+
     if (!payload) {
       console.warn("⚠️ Webhook received empty payload");
       return res.status(400).json({ error: "Empty payload" });
     }
 
-    const messages = Array.isArray(payload?.messages)
-      ? payload.messages
-      : Array.isArray(payload)
-      ? payload
-      : [payload];
+    let messages = [];
 
-    if (messages.length === 0) {
-      console.warn("⚠️ Webhook received no messages");
+    // 1️⃣ Format resmi wa-gateway (Baileys)
+    if (payload?.event === "message" && payload?.data?.messages) {
+      messages = payload.data.messages;
+    }
+
+    // 2️⃣ Fallback jika gateway kirim { messages: [...] }
+    else if (Array.isArray(payload?.messages)) {
+      messages = payload.messages;
+    }
+
+    // 3️⃣ Format curl manual { from, text }
+    else if (payload?.from && payload?.text) {
+      messages = [
+        {
+          from: payload.from,
+          text: payload.text,
+        },
+      ];
+    }
+
+    // 4️⃣ Tidak dikenali
+    else {
+      console.warn("⚠️ Unknown webhook payload format");
+      return res.json({ status: "ignored-unknown-format" });
     }
 
     for (const msg of messages) {
       await global.waClient.processMessage(msg);
     }
 
-    res.json({ status: "ok" });
+    return res.json({ status: "ok" });
   } catch (error) {
     console.error("❌ Webhook handling failed:", error);
-    res.status(500).json({ error: "Webhook processing failed" });
+    return res.status(500).json({ error: "Webhook processing failed" });
   }
 }
+
