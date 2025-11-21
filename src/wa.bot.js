@@ -43,10 +43,11 @@ export async function startProdWebBot() {
 
   const client = new Client({
     authStrategy: new LocalAuth({
-      dataPath: "./wa-session-prod", // Folder khusus untuk production
+      dataPath: "./wa-session-prod",
     }),
     puppeteer: {
       headless: true,
+      userDataDir: "./wa-session-prod/chromium-data", // 🆕 Tambahkan ini
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -55,7 +56,11 @@ export async function startProdWebBot() {
         "--no-first-run",
         "--no-zygote",
         "--disable-gpu",
+        "--single-process",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process", // 🆕 Tambahkan ini
       ],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
     },
   });
 
@@ -240,6 +245,18 @@ export async function startDevBot() {
   // Disconnected
   client.on("disconnected", (reason) => {
     console.log("📴 Bot disconnected:", reason);
+    global.waClient = { isReady: false };
+    
+    // 🆕 Auto-reconnect after 5 seconds
+    console.log("🔄 Attempting to reconnect in 5 seconds...");
+    setTimeout(async () => {
+      try {
+        await client.initialize();
+        console.log("✅ Reconnected successfully!");
+      } catch (error) {
+        console.error("❌ Reconnection failed:", error.message);
+      }
+    }, 5000);
   });
 
   // Message handler

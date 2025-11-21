@@ -2,7 +2,9 @@ node_modules
 .env
 .wwebjs_auth
 .wwebjs_cache
-wa-session-prod
-wa-session-dev
+wa-session-prod/**/SingletonLock
+wa-session-prod/**/SingletonSocket
+wa-session-prod/**/SingletonCookie
+wa-session-prod/chromium-data
 *.log
 .git
