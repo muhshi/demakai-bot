@@ -112,6 +112,9 @@ export async function startProdWebBot() {
         "--disable-gpu",
         "--single-process",
         "--disable-web-security",
+        "--disable-dev-profile",           // 🆕 Tambahkan
+        "--disable-features=AudioServiceOutOfProcess", // 🆕 Tambahkan
+        "--disable-features=TranslateUI",   // 🆕 Tambahkan
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
     },
