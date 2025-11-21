@@ -1,22 +1,28 @@
-# ========================================
-# 🐳 DEMAKAI BOT DOCKERFILE — FIXED
-# ========================================
 FROM node:20-alpine
 
-# 1️⃣ Set working directory
+# Install Chromium dan dependencies untuk puppeteer
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    nodejs \
+    yarn
+
+# Set environment variable untuk Puppeteer menggunakan Chromium system
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
 WORKDIR /app
 
-# 2️⃣ Copy dependency files
 COPY package*.json ./
 
-# 3️⃣ Install dependencies
 RUN npm install --omit=dev
 
-# 4️⃣ Copy the rest of the code
 COPY . .
 
-# 5️⃣ Expose port
 EXPOSE 3000
 
-# 6️⃣ Run the app
 CMD ["npm", "run", "start:mode"]
