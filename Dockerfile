@@ -1,20 +1,9 @@
-FROM node:20-alpine
+FROM ghcr.io/puppeteer/puppeteer:21.6.1
 
-# Install Chromium dan dependencies untuk puppeteer
-RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
-    nodejs \
-    yarn
+# Switch ke root untuk install dependencies
+USER root
 
-# Set environment variable untuk Puppeteer menggunakan Chromium system
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-
+# Install Node.js dependencies
 WORKDIR /app
 
 COPY package*.json ./
@@ -22,6 +11,13 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 COPY . .
+
+# Create directory untuk session storage
+RUN mkdir -p /app/wa-session-prod && \
+    chown -R pptruser:pptruser /app
+
+# Switch back to puppeteer user
+USER pptruser
 
 EXPOSE 3000
 

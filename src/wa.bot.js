@@ -89,7 +89,7 @@ function cleanChromiumLocks() {
 export async function startProdWebBot() {
   console.log("🚀 Starting Production Bot (whatsapp-web.js)...\n");
 
-  // 🆕 Clean locks before starting
+  // Clean locks before starting
   try {
     cleanChromiumLocks();
   } catch (err) {
@@ -103,20 +103,20 @@ export async function startProdWebBot() {
     puppeteer: {
       headless: true,
       args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-        "--single-process",
-        "--disable-web-security",
-        "--disable-dev-profile",           // 🆕 Tambahkan
-        "--disable-features=AudioServiceOutOfProcess", // 🆕 Tambahkan
-        "--disable-features=TranslateUI",   // 🆕 Tambahkan
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins',
+        '--disable-site-isolation-trials',
+        '--disable-features=BlockInsecurePrivateNetworkRequests',
       ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
+      
     },
   });
 

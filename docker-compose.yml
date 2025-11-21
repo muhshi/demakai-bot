@@ -12,10 +12,9 @@ services:
     networks:
       - demakai-prod-net
     volumes:
-      - ./wa-session-prod:/app/wa-session-prod  
+      - ./wa-session-prod:/app/wa-session-prod
     shm_size: '2gb'
 
 networks:
   demakai-prod-net:
     driver: bridge
-
